@@ -127,7 +127,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git://github.com/knex/knex.git"
+    "url": "git://github.com/ITDeptUtahCountyGovernment/knex"
   },
   "homepage": "https://knexjs.org",
   "keywords": [
