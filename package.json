@@ -42,7 +42,7 @@
     "getopts": "2.2.5",
     "interpret": "^2.2.0",
     "liftoff": "3.1.0",
-    "lodash": "^4.17.20",
+    "lodash": "^4.17.21",
     "pg-connection-string": "2.3.0",
     "tarn": "^3.0.1",
     "tildify": "2.0.0",
