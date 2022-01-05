@@ -84,6 +84,52 @@ module.exports = function (knex) {
             expect(res.queryContext).to.equal('the context');
           });
       });
+
+      it('should handle error correctly in a stream', (done) => {
+        const stream = knex('wrongtable').limit(1).stream();
+        stream.on('error', () => {
+          done();
+        });
+      });
+
+      it('should process response done through a stream', (done) => {
+        let response;
+        const stream = knex('accounts').limit(1).stream();
+
+        stream.on('data', (res) => {
+          response = res;
+        });
+        stream.on('finish', () => {
+          expect(response.callCount).to.equal(1);
+          done();
+        });
+      });
+
+      it('should pass query context for responses through a stream', (done) => {
+        let response;
+        const stream = knex('accounts')
+          .queryContext('the context')
+          .limit(1)
+          .stream();
+
+        stream.on('data', (res) => {
+          response = res;
+        });
+        stream.on('finish', () => {
+          expect(response.queryContext).to.equal('the context');
+          done();
+        });
+      });
+
+      it('should process response for each row done through a stream', (done) => {
+        const stream = knex('accounts').limit(5).stream();
+        let count = 0;
+        stream.on('data', () => count++);
+        stream.on('finish', () => {
+          expect(count).to.equal(5);
+          done();
+        });
+      });
     });
 
     describe('columnInfo with wrapIdentifier and postProcessResponse', () => {
@@ -346,7 +392,7 @@ module.exports = function (knex) {
           });
           tester(
             'oracledb',
-            "select * from xmltable( '/ROWSET/ROW'\n      passing dbms_xmlgen.getXMLType('\n      select char_col_decl_length, column_name, data_type, data_default, nullable\n      from user_tab_columns where table_name = ''datatype_test'' ')\n      columns\n      CHAR_COL_DECL_LENGTH number, COLUMN_NAME varchar2(200), DATA_TYPE varchar2(106),\n      DATA_DEFAULT clob, NULLABLE varchar2(1))",
+            "select * from xmltable( '/ROWSET/ROW'\n      passing dbms_xmlgen.getXMLType('\n      select char_col_decl_length, column_name, data_type, data_default, nullable\n      from all_tab_columns where table_name = ''datatype_test'' ')\n      columns\n      CHAR_COL_DECL_LENGTH number, COLUMN_NAME varchar2(200), DATA_TYPE varchar2(106),\n      DATA_DEFAULT clob, NULLABLE varchar2(1))",
             [],
             {
               enum_value: {
@@ -430,7 +476,7 @@ module.exports = function (knex) {
           });
           tester(
             'oracledb',
-            "select * from xmltable( '/ROWSET/ROW'\n      passing dbms_xmlgen.getXMLType('\n      select char_col_decl_length, column_name, data_type, data_default, nullable\n      from user_tab_columns where table_name = ''datatype_test'' ')\n      columns\n      CHAR_COL_DECL_LENGTH number, COLUMN_NAME varchar2(200), DATA_TYPE varchar2(106),\n      DATA_DEFAULT clob, NULLABLE varchar2(1))",
+            "select * from xmltable( '/ROWSET/ROW'\n      passing dbms_xmlgen.getXMLType('\n      select char_col_decl_length, column_name, data_type, data_default, nullable\n      from all_tab_columns where table_name = ''datatype_test'' ')\n      columns\n      CHAR_COL_DECL_LENGTH number, COLUMN_NAME varchar2(200), DATA_TYPE varchar2(106),\n      DATA_DEFAULT clob, NULLABLE varchar2(1))",
             [],
             {
               defaultValue: null,

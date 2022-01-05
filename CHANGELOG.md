@@ -1,5 +1,112 @@
 # Master (Unreleased)
 
+# 0.21.9 - 27 October, 2020
+
+### New features:
+
+- add method clear(statement) to QueryBuilder #4051
+
+### Bug fixes:
+
+- CLI: fix help text being printed twice #4072
+- Oracle: columnInfo() no longer requires an Owner User #4053
+- Add missing "start" event propagation from transaction #4087
+
+# 0.21.8 - 27 October, 2020
+
+### Bug fixes:
+
+- MSSQL: Escape properly if literal '?' is needed #4053
+- Make toQuery behavior consistent with pre-0.21.7 (do not break on empty builder) #4083
+- Fix comment escaping for MySQL and PostgreSQL #4084
+
+# 0.21.7 - 25 October, 2020
+
+### New features:
+
+- CLI: Add migration stub for .cjs extension #4065
+
+### Bug fixes:
+
+- MSSQL: Add dynamic scaling for decimal values and prevents a UInt64 overflow #3910
+- MSSQL: Fix apostrophe escaping #4077
+- Ensure that semicolon is not appended to statements that already end with a semicolon #4052
+
+### Typings:
+
+- Add arguments to QueryCallback in Where #4034
+
+### Test / internal changes:
+
+- Replace lodash type-checks with native solutions #4056
+- Replace mkdirp with native recursive flag #4060
+- Replace inherits package with builtin utility #4059
+
+# 0.21.6 - 27 September, 2020
+
+### New features:
+
+- CLI: New config parameter / CLI flag to prefixing seed filename with timestamp #3873
+- CLI: throw an error when specific seed file cannot be found #4011
+- Warn if whereNot is used with 'in' or 'between' #4038
+
+### Bug fixes:
+
+- CLI: Fix double merging of config for migrator #4040
+
+### Typings:
+
+- Unify SeedsConfig and SeederConfig #4003
+- Allow string[] type for directory in SeedsConfig #4033
+
+# 0.21.5 - 17 August, 2020
+
+### New features:
+
+- CLI: Improve Esm interop #3985
+- CLI: Improve mjs module support #3980
+
+### Test / internal changes:
+
+- Bump version of dtslint #3984
+- Test/document esm interop mixed formats (knexfile/migrations/seeds) #3986
+
+# 0.21.4 - 10 August, 2020
+
+### New features:
+
+- CLI: Add new option for seed: recursive #3974
+
+### Bug fixes:
+
+- CLI: Do not load seeds from subfolders recursively by default #3974
+
+# 0.21.3 - 08 August, 2020
+
+### New features:
+
+- CLI: Support multiple directories for seeds #3967
+
+### Bug fixes:
+
+- Ensure DB stream is destroyed when the PassThrough is destroyed #2324
+- Support postProcessResponse for streams #3931
+- Fix ESM module interop for calling module/package of type 'module' #3938
+- CLI: Fix migration source name in rollback all #3956
+- Fix getMergedConfig calls to include client logger #3920
+- Escape single quoted values passed to defaultTo function #3899
+
+### Typings:
+
+- Add .timeout(ms) to .raw()'s typescript typings #3885
+- Add typing for double table column builder #3950
+- Add a phantom tag to Ref type to mark received type parameters as used #3934
+- Add `null` as valid binding type #3946
+
+### Test / internal changes:
+
+- Change query lab link to https #3933
+
 # 0.21.2 - 10 July, 2020
 
 ### New features:
