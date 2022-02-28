@@ -8,6 +8,7 @@ const Redshift_Client = require('../../../lib/dialects/redshift');
 const Oracledb_Client = require('../../../lib/dialects/oracledb');
 const SQLite3_Client = require('../../../lib/dialects/sqlite3');
 const MSSQL_Client = require('../../../lib/dialects/mssql');
+const CockroachDB_Client = require('../../../lib/dialects/cockroachdb');
 
 // use driverName as key
 const clients = {
@@ -17,6 +18,7 @@ const clients = {
   oracledb: new Oracledb_Client({ client: 'oracledb' }),
   sqlite3: new SQLite3_Client({ client: 'sqlite3' }),
   mssql: new MSSQL_Client({ client: 'mssql' }),
+  cockroachdb: new CockroachDB_Client({ client: 'cockroachdb' }),
 };
 
 const useNullAsDefaultConfig = { useNullAsDefault: true };
@@ -209,7 +211,7 @@ describe('Custom identifier wrapping', () => {
         },
         sqlite3: {
           sql:
-            'insert into `users_wrapper_was_here` (`email_wrapper_was_here`, `name_wrapper_was_here`) select ? as `email_wrapper_was_here`, ? as `name_wrapper_was_here` union all select ? as `email_wrapper_was_here`, ? as `name_wrapper_was_here`',
+            'insert into `users_wrapper_was_here` (`email_wrapper_was_here`, `name_wrapper_was_here`) select ? as `email_wrapper_was_here`, ? as `name_wrapper_was_here` union all select ? as `email_wrapper_was_here`, ? as `name_wrapper_was_here` returning `id_wrapper_was_here`',
         },
         pg: {
           sql:
@@ -267,7 +269,7 @@ describe('Custom identifier wrapping', () => {
         },
         sqlite3: {
           sql:
-            'insert into `users_wrapper_was_here` (`email_wrapper_was_here`, `name_wrapper_was_here`) select ? as `email_wrapper_was_here`, ? as `name_wrapper_was_here` union all select ? as `email_wrapper_was_here`, ? as `name_wrapper_was_here`',
+            'insert into `users_wrapper_was_here` (`email_wrapper_was_here`, `name_wrapper_was_here`) select ? as `email_wrapper_was_here`, ? as `name_wrapper_was_here` union all select ? as `email_wrapper_was_here`, ? as `name_wrapper_was_here` returning `id_wrapper_was_here`, `name_wrapper_was_here`',
           bindings: ['foo', 'taylor', 'bar', 'dayle'],
         },
         pg: {
@@ -746,36 +748,38 @@ describe('QueryBuilder', () => {
   it('clear by statements', () => {
     testsql(
       qb()
-      .table('users')
-      .with('testWith', queryBuilder => {
-        return queryBuilder.table('user_info').where('a', 'b');
-      })
-      .join('tableJoin','id', 'id')
-      .select(['id'])
-      .where('id', '<', 10)
-      .groupBy('id')
-      .groupBy('id', 'desc')
-      .limit(100)
-      .offset(100)
-      .having('id', '>', 100)
-      .union(function() {
-        this.select('*').from('users').whereNull('first_name')
-      })
-      .unionAll(function() {
-        this.select('*').from('users').whereNull('first_name');
-      })
-      .clear('with')
-      .clear('join')
-      .clear('union')
-      .clear('columns')
-      .select(['id'])
-      .clear('select')
-      .clear('where')
-      .clear('group')
-      .clear('order')
-      .clear('limit')
-      .clear('offset')
-      .clear('having'),
+        .table('users')
+        .with('testWith', (queryBuilder) => {
+          return queryBuilder.table('user_info').where('a', 'b');
+        })
+        .join('tableJoin', 'id', 'id')
+        .select(['id'])
+        .hintComment('hint()')
+        .where('id', '<', 10)
+        .groupBy('id')
+        .groupBy('id', 'desc')
+        .limit(100)
+        .offset(100)
+        .having('id', '>', 100)
+        .union(function () {
+          this.select('*').from('users').whereNull('first_name');
+        })
+        .unionAll(function () {
+          this.select('*').from('users').whereNull('first_name');
+        })
+        .clear('with')
+        .clear('join')
+        .clear('union')
+        .clear('columns')
+        .select(['id'])
+        .clear('select')
+        .clear('hintComments')
+        .clear('where')
+        .clear('group')
+        .clear('order')
+        .clear('limit')
+        .clear('offset')
+        .clear('having'),
       {
         mysql: {
           sql: 'select * from `users`',
@@ -800,17 +804,17 @@ describe('QueryBuilder', () => {
   it('Can clear increment/decrement calls via .clear()', () => {
     testsql(
       qb()
-      .into('users')
-      .where('id', '=', 1)
-      .update({ email: 'foo@bar.com' })
-      .increment({
-        balance: 10,
-      })
-      .clear('counter')
-      .decrement({
-        value: 50,
-      })
-      .clear('counters'),
+        .into('users')
+        .where('id', '=', 1)
+        .update({ email: 'foo@bar.com' })
+        .increment({
+          balance: 10,
+        })
+        .clear('counter')
+        .decrement({
+          value: 50,
+        })
+        .clear('counters'),
       {
         pg: {
           sql: 'update "users" set "email" = ? where "id" = ?',
@@ -858,6 +862,42 @@ describe('QueryBuilder', () => {
       pg: 'select * from "users" where "id" = 1',
       'pg-redshift': 'select * from "users" where "id" = 1',
       mssql: 'select * from [users] where [id] = 1',
+    });
+  });
+
+  it('uses whereLike, #2265', () => {
+    testsql(qb().select('*').from('users').whereLike('name', 'luk%'), {
+      mysql: {
+        sql: 'select * from `users` where `name` like ? COLLATE utf8_bin',
+        bindings: ['luk%'],
+      },
+      pg: {
+        sql: 'select * from "users" where "name" like ?',
+        bindings: ['luk%'],
+      },
+      mssql: {
+        sql:
+          'select * from [users] where [name] collate SQL_Latin1_General_CP1_CS_AS like ?',
+        bindings: ['luk%'],
+      },
+    });
+  });
+
+  it('uses whereILike, #2265', () => {
+    testsql(qb().select('*').from('users').whereILike('name', 'luk%'), {
+      mysql: {
+        sql: 'select * from `users` where `name` like ?',
+        bindings: ['luk%'],
+      },
+      pg: {
+        sql: 'select * from "users" where "name" ilike ?',
+        bindings: ['luk%'],
+      },
+      mssql: {
+        sql:
+          'select * from [users] where [name] collate SQL_Latin1_General_CP1_CI_AS like ?',
+        bindings: ['luk%'],
+      },
     });
   });
 
@@ -1068,6 +1108,36 @@ describe('QueryBuilder', () => {
         'whereNot is not suitable for "in" and "between" type subqueries. You should use "not in" and "not between" instead.'
       );
     }
+  });
+
+  it('where not should not throw warning when used with "in" or "between" as equality', function () {
+    testquery(
+      clientsWithCustomLoggerForTestWarnings.pg
+        .queryBuilder()
+        .select('*')
+        .from('users')
+        .whereNot('id', 'in'),
+      {
+        mysql: "select * from `users` where not `id` = 'in'",
+        pg: 'select * from "users" where not "id" = \'in\'',
+        'pg-redshift': 'select * from "users" where not "id" = \'in\'',
+        mssql: "select * from [users] where not [id] = 'in'",
+      }
+    );
+
+    testquery(
+      clientsWithCustomLoggerForTestWarnings.pg
+        .queryBuilder()
+        .select('*')
+        .from('users')
+        .whereNot('id', 'between'),
+      {
+        mysql: "select * from `users` where not `id` = 'between'",
+        pg: 'select * from "users" where not "id" = \'between\'',
+        'pg-redshift': 'select * from "users" where not "id" = \'between\'',
+        mssql: "select * from [users] where not [id] = 'between'",
+      }
+    );
   });
 
   it('where bool', () => {
@@ -2123,15 +2193,6 @@ describe('QueryBuilder', () => {
     });
   });
 
-  // it("handles grouped mysql unions", function() {
-  //   chain = myqb().union(
-  //     raw(myqb().select('*').from('users').where('id', '=', 1)).wrap('(', ')'),
-  //     raw(myqb().select('*').from('users').where('id', '=', 2)).wrap('(', ')')
-  //   ).orderBy('id').limit(10).toSQL();
-  //   expect(chain.sql).to.equal('(select * from `users` where `id` = ?) union (select * from `users` where `id` = ?) order by `id` asc limit ?');
-  //   expect(chain.bindings).to.eql([1, 2, 10]);
-  // });
-
   it('union alls', () => {
     const chain = qb()
       .select('*')
@@ -2230,6 +2291,40 @@ describe('QueryBuilder', () => {
         sql:
           'select * from "users" where "id" = ? union all select * from "users" where "id" = ? union all select * from "users" where "id" = ?',
         bindings: [1, 2, 3],
+      },
+    });
+
+    // Issue #4364
+    const firstUnionAll = qb()
+      .unionAll([
+        function () {
+          this.select().from('users').where({ id: 1 });
+        },
+        function () {
+          this.select().from('users').where({ id: 2 });
+        },
+      ])
+      .first();
+    testsql(firstUnionAll, {
+      mysql: {
+        sql:
+          'select * from `users` where `id` = ? union all select * from `users` where `id` = ? limit ?',
+        bindings: [1, 2, 1],
+      },
+      mssql: {
+        sql:
+          'select * from [users] where [id] = ? union all select * from [users] where [id] = ?',
+        bindings: [1, 2],
+      },
+      pg: {
+        sql:
+          'select * from "users" where "id" = ? union all select * from "users" where "id" = ? limit ?',
+        bindings: [1, 2, 1],
+      },
+      'pg-redshift': {
+        sql:
+          'select * from "users" where "id" = ? union all select * from "users" where "id" = ? limit ?',
+        bindings: [1, 2, 1],
       },
     });
   });
@@ -3698,6 +3793,40 @@ describe('QueryBuilder', () => {
     });
   });
 
+  it('limits with skip binding', () => {
+    testsql(
+      qb()
+        .select('*')
+        .from('users')
+        .limit(10, { skipBinding: true })
+        .offset(5, true),
+      {
+        mysql: {
+          sql: 'select * from `users` limit 10 offset 5',
+        },
+        sqlite3: {
+          sql: 'select * from `users` limit 10 offset 5',
+        },
+        mssql: {
+          sql: 'select * from [users] offset 5 rows fetch next 10 rows only',
+        },
+        oracledb: {
+          sql:
+            'select * from (select row_.*, ROWNUM rownum_ from (select * from "users") row_ where rownum <= 15) where rownum_ > 5',
+        },
+        pg: {
+          sql: 'select * from "users" limit 10 offset 5',
+        },
+        cockroachdb: {
+          sql: 'select * from "users" limit 10 offset 5',
+        },
+        'pg-redshift': {
+          sql: 'select * from "users" limit 10 offset 5',
+        },
+      }
+    );
+  });
+
   it('limits and raw selects', () => {
     testsql(
       qb()
@@ -4870,6 +4999,31 @@ describe('QueryBuilder', () => {
     );
   });
 
+  it('or on in with raw', () => {
+    testsql(
+      qb()
+        .select('*')
+        .from('users')
+        .join('contacts', (qb) => {
+          qb.on('users.id', '=', 'contacts.id')
+            .onIn('contacts.id', [7, 15, 23, 41])
+            .orOnIn('users.id', raw('select id from users where age > 18'));
+        }),
+      {
+        mysql:
+          'select * from `users` inner join `contacts` on `users`.`id` = `contacts`.`id` and `contacts`.`id` in (?, ?, ?, ?) or `users`.`id` in (select id from users where age > 18)',
+        mssql:
+          'select * from [users] inner join [contacts] on [users].[id] = [contacts].[id] and [contacts].[id] in (?, ?, ?, ?) or [users].[id] in (select id from users where age > 18)',
+        pg:
+          'select * from "users" inner join "contacts" on "users"."id" = "contacts"."id" and "contacts"."id" in (?, ?, ?, ?) or "users"."id" in (select id from users where age > 18)',
+        'pg-redshift':
+          'select * from "users" inner join "contacts" on "users"."id" = "contacts"."id" and "contacts"."id" in (?, ?, ?, ?) or "users"."id" in (select id from users where age > 18)',
+        oracledb:
+          'select * from "users" inner join "contacts" on "users"."id" = "contacts"."id" and "contacts"."id" in (?, ?, ?, ?) or "users"."id" in (select id from users where age > 18)',
+      }
+    );
+  });
+
   it('on not in', () => {
     testsql(
       qb()
@@ -4919,6 +5073,29 @@ describe('QueryBuilder', () => {
           'select * from "users" inner join "contacts" on "users"."id" = "contacts"."id" and "contacts"."id" not in (?, ?, ?, ?) or "users"."id" not in (?, ?)',
         oracledb:
           'select * from "users" inner join "contacts" on "users"."id" = "contacts"."id" and "contacts"."id" not in (?, ?, ?, ?) or "users"."id" not in (?, ?)',
+      }
+    );
+  });
+
+  it('on json path join', () => {
+    testsql(
+      qb()
+        .select('*')
+        .from('users')
+        .join('contacts', (qb) => {
+          qb.onJsonPathEquals(
+            'users.infos',
+            '$.name',
+            'contacts.data',
+            '$.infos.name'
+          );
+        }),
+      {
+        pg: {
+          sql:
+            'select * from "users" inner join "contacts" on jsonb_path_query_first("users"."infos", ?) = jsonb_path_query_first("contacts"."data", ?)',
+          bindings: ['$.name', '$.infos.name'],
+        },
       }
     );
   });
@@ -5536,7 +5713,7 @@ describe('QueryBuilder', () => {
         },
         sqlite3: {
           sql:
-            'insert into `users` (`email`, `name`) select ? as `email`, ? as `name` union all select ? as `email`, ? as `name`',
+            'insert into `users` (`email`, `name`) select ? as `email`, ? as `name` union all select ? as `email`, ? as `name` returning `id`',
         },
         pg: {
           sql:
@@ -5591,7 +5768,7 @@ describe('QueryBuilder', () => {
         },
         sqlite3: {
           sql:
-            'insert into `users` (`email`, `name`) select ? as `email`, ? as `name` union all select ? as `email`, ? as `name`',
+            'insert into `users` (`email`, `name`) select ? as `email`, ? as `name` union all select ? as `email`, ? as `name` returning `id`, `name`',
           bindings: ['foo', 'taylor', 'bar', 'dayle'],
         },
         pg: {
@@ -5923,6 +6100,84 @@ describe('QueryBuilder', () => {
     );
   });
 
+  it('order by, null first', () => {
+    testsql(qb().from('users').orderBy('foo', 'desc', 'first'), {
+      mysql: {
+        sql: 'select * from `users` order by (`foo` is not null) desc',
+      },
+      mssql: {
+        sql: 'select * from [users] order by IIF([foo] is null,0,1) desc',
+      },
+      pg: {
+        sql: 'select * from "users" order by "foo" desc nulls first',
+      },
+      'pg-redshift': {
+        sql: 'select * from "users" order by "foo" desc nulls first',
+      },
+    });
+  });
+
+  it('order by, null first, array notation', () => {
+    testsql(
+      qb()
+        .from('users')
+        .orderBy([{ column: 'foo', order: 'desc', nulls: 'first' }]),
+      {
+        mysql: {
+          sql: 'select * from `users` order by (`foo` is not null) desc',
+        },
+        mssql: {
+          sql: 'select * from [users] order by IIF([foo] is null,0,1) desc',
+        },
+        pg: {
+          sql: 'select * from "users" order by "foo" desc nulls first',
+        },
+        'pg-redshift': {
+          sql: 'select * from "users" order by "foo" desc nulls first',
+        },
+      }
+    );
+  });
+
+  it('order by, null last', () => {
+    testsql(qb().from('users').orderBy('foo', 'desc', 'last'), {
+      mysql: {
+        sql: 'select * from `users` order by (`foo` is null) desc',
+      },
+      mssql: {
+        sql: 'select * from [users] order by IIF([foo] is null,1,0) desc',
+      },
+      pg: {
+        sql: 'select * from "users" order by "foo" desc nulls last',
+      },
+      'pg-redshift': {
+        sql: 'select * from "users" order by "foo" desc nulls last',
+      },
+    });
+  });
+
+  it('order by, null last, array notation', () => {
+    testsql(
+      qb()
+        .from('users')
+        .orderBy([{ column: 'foo', order: 'desc', nulls: 'last' }]),
+      {
+        mysql: {
+          sql: 'select * from `users` order by (`foo` is null) desc',
+        },
+        mssql: {
+          sql: 'select * from [users] order by IIF([foo] is null,1,0) desc',
+        },
+        pg: {
+          sql: 'select * from "users" order by "foo" desc nulls last',
+        },
+        'pg-redshift': {
+          sql: 'select * from "users" order by "foo" desc nulls last',
+        },
+      }
+    );
+  });
+
   it('update method with joins mysql', () => {
     testsql(
       qb()
@@ -6182,6 +6437,225 @@ describe('QueryBuilder', () => {
         },
       }
     );
+  });
+
+  it('insert method respects raw bindings', () => {
+    testsql(
+      qb()
+        .insert({ email: raw('CURRENT TIMESTAMP') })
+        .into('users'),
+      {
+        mysql: {
+          sql: 'insert into `users` (`email`) values (CURRENT TIMESTAMP)',
+          bindings: [],
+        },
+        mssql: {
+          sql: 'insert into [users] ([email]) values (CURRENT TIMESTAMP)',
+          bindings: [],
+        },
+        pg: {
+          sql: 'insert into "users" ("email") values (CURRENT TIMESTAMP)',
+          bindings: [],
+        },
+        'pg-redshift': {
+          sql: 'insert into "users" ("email") values (CURRENT TIMESTAMP)',
+          bindings: [],
+        },
+      }
+    );
+  });
+
+  it('insert ignore', () => {
+    testsql(
+      qb().insert({ email: 'foo' }).onConflict('email').ignore().into('users'),
+      {
+        mysql: {
+          sql: 'insert ignore into `users` (`email`) values (?)',
+          bindings: ['foo'],
+        },
+        pg: {
+          sql:
+            'insert into "users" ("email") values (?) on conflict ("email") do nothing',
+          bindings: ['foo'],
+        },
+        sqlite3: {
+          sql:
+            'insert into `users` (`email`) values (?) on conflict (`email`) do nothing',
+          bindings: ['foo'],
+        },
+      }
+    );
+  });
+
+  it('insert ignore multiple', () => {
+    testsql(
+      qb()
+        .insert([{ email: 'foo' }, { email: 'bar' }])
+        .onConflict('email')
+        .ignore()
+        .into('users'),
+      {
+        mysql: {
+          sql: 'insert ignore into `users` (`email`) values (?), (?)',
+          bindings: ['foo', 'bar'],
+        },
+        pg: {
+          sql:
+            'insert into "users" ("email") values (?), (?) on conflict ("email") do nothing',
+          bindings: ['foo', 'bar'],
+        },
+        sqlite3: {
+          sql:
+            'insert into `users` (`email`) select ? as `email` union all select ? as `email` where true on conflict (`email`) do nothing',
+          bindings: ['foo', 'bar'],
+        },
+      }
+    );
+  });
+
+  it('insert ignore multiple with raw onConflict', () => {
+    testsql(
+      qb()
+        .insert([{ email: 'foo' }, { email: 'bar' }])
+        .onConflict(raw('(value) WHERE deleted_at IS NULL'))
+        .ignore()
+        .into('users'),
+      {
+        mysql: {
+          sql: 'insert ignore into `users` (`email`) values (?), (?)',
+          bindings: ['foo', 'bar'],
+        },
+        pg: {
+          sql:
+            'insert into "users" ("email") values (?), (?) on conflict (value) WHERE deleted_at IS NULL do nothing',
+          bindings: ['foo', 'bar'],
+        },
+        sqlite3: {
+          sql:
+            'insert into `users` (`email`) select ? as `email` union all select ? as `email` where true on conflict (value) WHERE deleted_at IS NULL do nothing',
+          bindings: ['foo', 'bar'],
+        },
+      }
+    );
+  });
+
+  it('insert ignore with composite unique keys', () => {
+    testsql(
+      qb()
+        .insert([{ org: 'acme-inc', email: 'foo' }])
+        .onConflict(['org', 'email'])
+        .ignore()
+        .into('users'),
+      {
+        mysql: {
+          sql: 'insert ignore into `users` (`email`, `org`) values (?, ?)',
+          bindings: ['foo', 'acme-inc'],
+        },
+        pg: {
+          sql:
+            'insert into "users" ("email", "org") values (?, ?) on conflict ("org", "email") do nothing',
+          bindings: ['foo', 'acme-inc'],
+        },
+        sqlite3: {
+          sql:
+            'insert into `users` (`email`, `org`) values (?, ?) on conflict (`org`, `email`) do nothing',
+          bindings: ['foo', 'acme-inc'],
+        },
+      }
+    );
+  });
+
+  it('insert merge with explicit updates', () => {
+    testsql(
+      qb()
+        .from('users')
+        .insert([
+          { email: 'foo', name: 'taylor' },
+          { email: 'bar', name: 'dayle' },
+        ])
+        .onConflict('email')
+        .merge({ name: 'overidden' }),
+      {
+        mysql: {
+          sql:
+            'insert into `users` (`email`, `name`) values (?, ?), (?, ?) on duplicate key update `name` = ?',
+          bindings: ['foo', 'taylor', 'bar', 'dayle', 'overidden'],
+        },
+        sqlite3: {
+          sql:
+            'insert into `users` (`email`, `name`) select ? as `email`, ? as `name` union all select ? as `email`, ? as `name` where true on conflict (`email`) do update set `name` = ?',
+          bindings: ['foo', 'taylor', 'bar', 'dayle', 'overidden'],
+        },
+        pg: {
+          sql:
+            'insert into "users" ("email", "name") values (?, ?), (?, ?) on conflict ("email") do update set "name" = ?',
+          bindings: ['foo', 'taylor', 'bar', 'dayle', 'overidden'],
+        },
+      }
+    );
+  });
+
+  it('insert merge multiple with implicit updates', () => {
+    testsql(
+      qb()
+        .from('users')
+        .insert([
+          { email: 'foo', name: 'taylor' },
+          { email: 'bar', name: 'dayle' },
+        ])
+        .onConflict('email')
+        .merge(),
+      {
+        mysql: {
+          sql:
+            'insert into `users` (`email`, `name`) values (?, ?), (?, ?) on duplicate key update `email` = values(`email`), `name` = values(`name`)',
+          bindings: ['foo', 'taylor', 'bar', 'dayle'],
+        },
+        sqlite3: {
+          sql:
+            'insert into `users` (`email`, `name`) select ? as `email`, ? as `name` union all select ? as `email`, ? as `name` where true on conflict (`email`) do update set `email` = excluded.`email`, `name` = excluded.`name`',
+          bindings: ['foo', 'taylor', 'bar', 'dayle'],
+        },
+        pg: {
+          sql:
+            'insert into "users" ("email", "name") values (?, ?), (?, ?) on conflict ("email") do update set "email" = excluded."email", "name" = excluded."name"',
+          bindings: ['foo', 'taylor', 'bar', 'dayle'],
+        },
+      }
+    );
+  });
+
+  it('insert merge with where clause', () => {
+    testsql(
+      qb()
+        .from('users')
+        .insert({ email: 'foo', name: 'taylor' })
+        .onConflict('email')
+        .merge()
+        .where('email', 'foo2'),
+      {
+        pg: {
+          sql:
+            'insert into "users" ("email", "name") values (?, ?) on conflict ("email") do update set "email" = excluded."email", "name" = excluded."name" where "email" = ?',
+          bindings: ['foo', 'taylor', 'foo2'],
+        },
+        sqlite3: {
+          sql:
+            'insert into `users` (`email`, `name`) values (?, ?) on conflict (`email`) do update set `email` = excluded.`email`, `name` = excluded.`name` where `email` = ?',
+          bindings: ['foo', 'taylor', 'foo2'],
+        },
+      }
+    );
+
+    expect(() => {
+      clients.mysql
+        .queryBuilder()
+        .insert({ email: 'foo', name: 'taylor' })
+        .onConflict('email')
+        .merge()
+        .where('email', 'foo2')
+        .toString();
+    }).to.throw('onConflict().merge().where() is not supported for mysql');
   });
 
   it('Calling decrement and then increment will overwrite the previous value', () => {
@@ -6577,6 +7051,27 @@ describe('QueryBuilder', () => {
     });
   });
 
+  it('lock for no key update', () => {
+    testsql(
+      qb().select('*').from('foo').where('bar', '=', 'baz').forNoKeyUpdate(),
+      {
+        pg: {
+          sql: 'select * from "foo" where "bar" = ? for no key update',
+          bindings: ['baz'],
+        },
+      }
+    );
+  });
+
+  it('lock for key share', () => {
+    testsql(qb().select('*').from('foo').where('bar', '=', 'baz').forShare(), {
+      pg: {
+        sql: 'select * from "foo" where "bar" = ? for share',
+        bindings: ['baz'],
+      },
+    });
+  });
+
   it('should allow lock (such as forUpdate) outside of a transaction', () => {
     testsql(qb().select('*').from('foo').where('bar', '=', 'baz').forUpdate(), {
       mysql: {
@@ -6601,6 +7096,34 @@ describe('QueryBuilder', () => {
         .from('foo')
         .where('bar', '=', 'baz')
         .forUpdate('lo', 'rem'),
+      {
+        mysql: {
+          sql: 'select * from `foo` where `bar` = ? for update',
+          bindings: ['baz'],
+        },
+        pg: {
+          sql: 'select * from "foo" where "bar" = ? for update of "lo", "rem"',
+          bindings: ['baz'],
+        },
+        mssql: {
+          sql: 'select * from [foo] with (UPDLOCK) where [bar] = ?',
+          bindings: ['baz'],
+        },
+        oracledb: {
+          sql: 'select * from "foo" where "bar" = ? for update',
+          bindings: ['baz'],
+        },
+      }
+    );
+  });
+
+  it('lock only some tables for update (with array #4878)', () => {
+    testsql(
+      qb()
+        .select('*')
+        .from('foo')
+        .where('bar', '=', 'baz')
+        .forUpdate(['lo', 'rem']),
       {
         mysql: {
           sql: 'select * from `foo` where `bar` = ? for update',
@@ -7493,6 +8016,935 @@ describe('QueryBuilder', () => {
     );
   });
 
+  it('dense_rank with string and no partition', function () {
+    testsql(qb().select('*').from('accounts').denseRank(null, 'email'), {
+      mssql: {
+        sql: 'select *, dense_rank() over (order by [email]) from [accounts]',
+      },
+      pg: {
+        sql: 'select *, dense_rank() over (order by "email") from "accounts"',
+      },
+      oracledb: {
+        sql: 'select *, dense_rank() over (order by "email") from "accounts"',
+      },
+    });
+  });
+
+  it('dense_rank with array and no partition', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .denseRank('test_alias', ['email', 'name']),
+      {
+        mssql: {
+          sql:
+            'select *, dense_rank() over (order by [email], [name]) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, dense_rank() over (order by "email", "name") as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, dense_rank() over (order by "email", "name") as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('dense_rank with array', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .denseRank(null, ['email'], ['address', 'phone']),
+      {
+        mssql: {
+          sql:
+            'select *, dense_rank() over (partition by [address], [phone] order by [email]) from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, dense_rank() over (partition by "address", "phone" order by "email") from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, dense_rank() over (partition by "address", "phone" order by "email") from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('dense_rank with string', function () {
+    testsql(
+      qb().select('*').from('accounts').denseRank(null, 'email', 'address'),
+      {
+        mssql: {
+          sql:
+            'select *, dense_rank() over (partition by [address] order by [email]) from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, dense_rank() over (partition by "address" order by "email") from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, dense_rank() over (partition by "address" order by "email") from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('dense_rank with array and alias', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .denseRank('test_alias', ['email'], ['address', 'phone']),
+      {
+        mssql: {
+          sql:
+            'select *, dense_rank() over (partition by [address], [phone] order by [email]) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, dense_rank() over (partition by "address", "phone" order by "email") as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, dense_rank() over (partition by "address", "phone" order by "email") as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('dense_rank with string and alias', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .denseRank('test_alias', 'email', 'address'),
+      {
+        mssql: {
+          sql:
+            'select *, dense_rank() over (partition by [address] order by [email]) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, dense_rank() over (partition by "address" order by "email") as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, dense_rank() over (partition by "address" order by "email") as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('dense_rank with function', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .denseRank(null, function () {
+          this.orderBy('email');
+        }),
+      {
+        mssql: {
+          sql: 'select *, dense_rank() over (order by [email]) from [accounts]',
+        },
+        pg: {
+          sql: 'select *, dense_rank() over (order by "email") from "accounts"',
+        },
+        oracledb: {
+          sql: 'select *, dense_rank() over (order by "email") from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('dense_rank with function and alias', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .denseRank('test_alias', function () {
+          this.orderBy('email').partitionBy('address');
+        }),
+      {
+        mssql: {
+          sql:
+            'select *, dense_rank() over (partition by [address] order by [email]) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, dense_rank() over (partition by "address" order by "email") as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, dense_rank() over (partition by "address" order by "email") as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('dense_rank with function and arrays', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .denseRank('test_alias', function () {
+          this.orderBy(['email', 'name']).partitionBy(['address', 'phone']);
+        }),
+      {
+        mssql: {
+          sql:
+            'select *, dense_rank() over (partition by [address], [phone] order by [email], [name]) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, dense_rank() over (partition by "address", "phone" order by "email", "name") as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, dense_rank() over (partition by "address", "phone" order by "email", "name") as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('dense_rank with function and chains', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .denseRank('test_alias', function () {
+          this.orderBy('email')
+            .partitionBy('address')
+            .partitionBy('phone')
+            .orderBy('name');
+        }),
+      {
+        mssql: {
+          sql:
+            'select *, dense_rank() over (partition by [address], [phone] order by [email], [name]) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, dense_rank() over (partition by "address", "phone" order by "email", "name") as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, dense_rank() over (partition by "address", "phone" order by "email", "name") as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('chained dense_rank ', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .denseRank('first_alias', 'email')
+        .denseRank('second_alias', 'address'),
+      {
+        mssql: {
+          sql:
+            'select *, dense_rank() over (order by [email]) as first_alias, dense_rank() over (order by [address]) as second_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, dense_rank() over (order by "email") as first_alias, dense_rank() over (order by "address") as second_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, dense_rank() over (order by "email") as first_alias, dense_rank() over (order by "address") as second_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('dense_rank with raw', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .denseRank(null, raw('partition by address order by email')),
+      {
+        mssql: {
+          sql:
+            'select *, dense_rank() over (partition by address order by email) from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, dense_rank() over (partition by address order by email) from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, dense_rank() over (partition by address order by email) from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('dense_rank with raw and alias', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .denseRank('test_alias', raw('partition by address order by email')),
+      {
+        mssql: {
+          sql:
+            'select *, dense_rank() over (partition by address order by email) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, dense_rank() over (partition by address order by email) as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, dense_rank() over (partition by address order by email) as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('rank with string and no partition', function () {
+    testsql(qb().select('*').from('accounts').rank(null, 'email'), {
+      mssql: {
+        sql: 'select *, rank() over (order by [email]) from [accounts]',
+      },
+      pg: {
+        sql: 'select *, rank() over (order by "email") from "accounts"',
+      },
+      oracledb: {
+        sql: 'select *, rank() over (order by "email") from "accounts"',
+      },
+    });
+  });
+
+  it('rank with array and alias', function () {
+    testsql(
+      qb().select('*').from('accounts').rank('test_alias', ['email', 'name']),
+      {
+        mssql: {
+          sql:
+            'select *, rank() over (order by [email], [name]) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, rank() over (order by "email", "name") as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, rank() over (order by "email", "name") as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('rank with array', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rank(null, ['email'], ['address', 'phone']),
+      {
+        mssql: {
+          sql:
+            'select *, rank() over (partition by [address], [phone] order by [email]) from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, rank() over (partition by "address", "phone" order by "email") from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, rank() over (partition by "address", "phone" order by "email") from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('rank with string', function () {
+    testsql(qb().select('*').from('accounts').rank(null, 'email', 'address'), {
+      mssql: {
+        sql:
+          'select *, rank() over (partition by [address] order by [email]) from [accounts]',
+      },
+      pg: {
+        sql:
+          'select *, rank() over (partition by "address" order by "email") from "accounts"',
+      },
+      oracledb: {
+        sql:
+          'select *, rank() over (partition by "address" order by "email") from "accounts"',
+      },
+    });
+  });
+
+  it('rank with array and alias', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rank('test_alias', ['email'], ['address', 'phone']),
+      {
+        mssql: {
+          sql:
+            'select *, rank() over (partition by [address], [phone] order by [email]) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, rank() over (partition by "address", "phone" order by "email") as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, rank() over (partition by "address", "phone" order by "email") as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('rank with string and alias', function () {
+    testsql(
+      qb().select('*').from('accounts').rank('test_alias', 'email', 'address'),
+      {
+        mssql: {
+          sql:
+            'select *, rank() over (partition by [address] order by [email]) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, rank() over (partition by "address" order by "email") as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, rank() over (partition by "address" order by "email") as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('rank with function', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rank(null, function () {
+          this.orderBy('email');
+        }),
+      {
+        mssql: {
+          sql: 'select *, rank() over (order by [email]) from [accounts]',
+        },
+        pg: {
+          sql: 'select *, rank() over (order by "email") from "accounts"',
+        },
+        oracledb: {
+          sql: 'select *, rank() over (order by "email") from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('rank with function and alias', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rank('test_alias', function () {
+          this.orderBy('email').partitionBy('address');
+        }),
+      {
+        mssql: {
+          sql:
+            'select *, rank() over (partition by [address] order by [email]) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, rank() over (partition by "address" order by "email") as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, rank() over (partition by "address" order by "email") as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('rank with function and arrays', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rank('test_alias', function () {
+          this.orderBy(['email', 'name']).partitionBy(['address', 'phone']);
+        }),
+      {
+        mssql: {
+          sql:
+            'select *, rank() over (partition by [address], [phone] order by [email], [name]) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, rank() over (partition by "address", "phone" order by "email", "name") as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, rank() over (partition by "address", "phone" order by "email", "name") as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('rank with function and chains', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rank('test_alias', function () {
+          this.orderBy('email')
+            .partitionBy('address')
+            .partitionBy('phone')
+            .orderBy('name');
+        }),
+      {
+        mssql: {
+          sql:
+            'select *, rank() over (partition by [address], [phone] order by [email], [name]) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, rank() over (partition by "address", "phone" order by "email", "name") as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, rank() over (partition by "address", "phone" order by "email", "name") as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('chained rank', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rank('first_alias', 'email')
+        .rank('second_alias', 'address'),
+      {
+        mssql: {
+          sql:
+            'select *, rank() over (order by [email]) as first_alias, rank() over (order by [address]) as second_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, rank() over (order by "email") as first_alias, rank() over (order by "address") as second_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, rank() over (order by "email") as first_alias, rank() over (order by "address") as second_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('rank with raw', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rank(null, raw('partition by address order by email')),
+      {
+        mssql: {
+          sql:
+            'select *, rank() over (partition by address order by email) from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, rank() over (partition by address order by email) from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, rank() over (partition by address order by email) from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('rank with raw and alias', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rank('test_alias', raw('partition by address order by email')),
+      {
+        mssql: {
+          sql:
+            'select *, rank() over (partition by address order by email) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, rank() over (partition by address order by email) as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, rank() over (partition by address order by email) as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('row_number with string and no partition', function () {
+    testsql(qb().select('*').from('accounts').rowNumber(null, 'email'), {
+      mssql: {
+        sql: 'select *, row_number() over (order by [email]) from [accounts]',
+      },
+      pg: {
+        sql: 'select *, row_number() over (order by "email") from "accounts"',
+      },
+      oracledb: {
+        sql: 'select *, row_number() over (order by "email") from "accounts"',
+      },
+    });
+  });
+
+  it('row_number with array and no partition', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rowNumber('test_alias', ['email', 'name']),
+      {
+        mssql: {
+          sql:
+            'select *, row_number() over (order by [email], [name]) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, row_number() over (order by "email", "name") as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, row_number() over (order by "email", "name") as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('row_number with array', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rowNumber(null, ['email'], ['address', 'phone']),
+      {
+        mssql: {
+          sql:
+            'select *, row_number() over (partition by [address], [phone] order by [email]) from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, row_number() over (partition by "address", "phone" order by "email") from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, row_number() over (partition by "address", "phone" order by "email") from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('row_number with object', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rowNumber(null, { column: 'email', order: 'asc' }, [
+          { column: 'address', order: 'asc' },
+          'phone',
+        ]),
+      {
+        mssql: {
+          sql:
+            'select *, row_number() over (partition by [address] asc, [phone] order by [email] asc) from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, row_number() over (partition by "address" asc, "phone" order by "email" asc) from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, row_number() over (partition by "address" asc, "phone" order by "email" asc) from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('row_number with string', function () {
+    testsql(
+      qb().select('*').from('accounts').rowNumber(null, 'email', 'address'),
+      {
+        mssql: {
+          sql:
+            'select *, row_number() over (partition by [address] order by [email]) from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, row_number() over (partition by "address" order by "email") from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, row_number() over (partition by "address" order by "email") from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('row_number with array and alias', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rowNumber('test_alias', ['email'], ['address', 'phone']),
+      {
+        mssql: {
+          sql:
+            'select *, row_number() over (partition by [address], [phone] order by [email]) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, row_number() over (partition by "address", "phone" order by "email") as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, row_number() over (partition by "address", "phone" order by "email") as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('row_number with string and alias', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rowNumber('test_alias', 'email', 'address'),
+      {
+        mssql: {
+          sql:
+            'select *, row_number() over (partition by [address] order by [email]) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, row_number() over (partition by "address" order by "email") as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, row_number() over (partition by "address" order by "email") as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('row_number with function', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rowNumber(null, function () {
+          this.orderBy('email');
+        }),
+      {
+        mssql: {
+          sql: 'select *, row_number() over (order by [email]) from [accounts]',
+        },
+        pg: {
+          sql: 'select *, row_number() over (order by "email") from "accounts"',
+        },
+        oracledb: {
+          sql: 'select *, row_number() over (order by "email") from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('row_number with function and alias', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rowNumber('test_alias', function () {
+          this.orderBy('email').partitionBy('address');
+        }),
+      {
+        mssql: {
+          sql:
+            'select *, row_number() over (partition by [address] order by [email]) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, row_number() over (partition by "address" order by "email") as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, row_number() over (partition by "address" order by "email") as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('row_number with function and arrays', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rowNumber('test_alias', function () {
+          this.orderBy(['email', 'name']).partitionBy(['address', 'phone']);
+        }),
+      {
+        mssql: {
+          sql:
+            'select *, row_number() over (partition by [address], [phone] order by [email], [name]) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, row_number() over (partition by "address", "phone" order by "email", "name") as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, row_number() over (partition by "address", "phone" order by "email", "name") as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('row_number with function and chains', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rowNumber('test_alias', function () {
+          this.orderBy('email')
+            .partitionBy('address')
+            .partitionBy('phone')
+            .orderBy('name');
+        }),
+      {
+        mssql: {
+          sql:
+            'select *, row_number() over (partition by [address], [phone] order by [email], [name]) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, row_number() over (partition by "address", "phone" order by "email", "name") as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, row_number() over (partition by "address", "phone" order by "email", "name") as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('chained row_number', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rowNumber('first_alias', 'email')
+        .rowNumber('second_alias', 'address'),
+      {
+        mssql: {
+          sql:
+            'select *, row_number() over (order by [email]) as first_alias, row_number() over (order by [address]) as second_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, row_number() over (order by "email") as first_alias, row_number() over (order by "address") as second_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, row_number() over (order by "email") as first_alias, row_number() over (order by "address") as second_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('row_number with raw', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rowNumber(null, raw('partition by address order by email')),
+      {
+        mssql: {
+          sql:
+            'select *, row_number() over (partition by address order by email) from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, row_number() over (partition by address order by email) from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, row_number() over (partition by address order by email) from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('row_number with raw and alias', function () {
+    testsql(
+      qb()
+        .select('*')
+        .from('accounts')
+        .rowNumber('test_alias', raw('partition by address order by email')),
+      {
+        mssql: {
+          sql:
+            'select *, row_number() over (partition by address order by email) as test_alias from [accounts]',
+        },
+        pg: {
+          sql:
+            'select *, row_number() over (partition by address order by email) as test_alias from "accounts"',
+        },
+        oracledb: {
+          sql:
+            'select *, row_number() over (partition by address order by email) as test_alias from "accounts"',
+        },
+      }
+    );
+  });
+
+  it('allows sub-query function on insert, #427', function () {
+    testsql(
+      qb()
+        .into('votes')
+        .insert(function () {
+          this.select('*').from('votes').where('id', 99);
+        }),
+      {
+        mysql: {
+          sql: 'insert into `votes` select * from `votes` where `id` = ?',
+          bindings: [99],
+        },
+        mssql: {
+          sql: 'insert into [votes] select * from [votes] where [id] = ?',
+          bindings: [99],
+        },
+        pg: {
+          sql: 'insert into "votes" select * from "votes" where "id" = ?',
+          bindings: [99],
+        },
+      }
+    );
+  });
+
   it('allows sub-query chain on insert, #427', () => {
     testsql(
       qb().into('votes').insert(qb().select('*').from('votes').where('id', 99)),
@@ -7721,6 +9173,15 @@ describe('QueryBuilder', () => {
         },
       }
     );
+  });
+
+  it('uses fromRaw api, #1767', () => {
+    testsql(qb().select('*').fromRaw('(select * from users where age > 18)'), {
+      mysql: 'select * from (select * from users where age > 18)',
+      mssql: 'select * from (select * from users where age > 18)',
+      pg: 'select * from (select * from users where age > 18)',
+      'pg-redshift': 'select * from (select * from users where age > 18)',
+    });
   });
 
   it('has a modify method which accepts a function that can modify the query', () => {
@@ -8127,6 +9588,161 @@ describe('QueryBuilder', () => {
     });
   });
 
+  it('#4199 - allows an hint comment', () => {
+    testsql(qb().from('testtable').hintComment('hint()'), {
+      mysql: {
+        sql: 'select /*+ hint() */ * from `testtable`',
+        bindings: [],
+      },
+      oracledb: {
+        sql: 'select /*+ hint() */ * from "testtable"',
+        bindings: [],
+      },
+      mssql: {
+        sql: 'select /*+ hint() */ * from [testtable]',
+        bindings: [],
+      },
+      pg: {
+        sql: 'select /*+ hint() */ * from "testtable"',
+        bindings: [],
+      },
+      'pg-redshift': {
+        sql: 'select /*+ hint() */ * from "testtable"',
+        bindings: [],
+      },
+    });
+  });
+
+  it('#4199 - allows multiple hint comments', () => {
+    testsql(
+      qb()
+        .from('testtable')
+        .hintComment(['hint1()', 'hint2()'])
+        .hintComment('hint3()'),
+      {
+        mysql: {
+          sql: 'select /*+ hint1() hint2() hint3() */ * from `testtable`',
+          bindings: [],
+        },
+        oracledb: {
+          sql: 'select /*+ hint1() hint2() hint3() */ * from "testtable"',
+          bindings: [],
+        },
+        mssql: {
+          sql: 'select /*+ hint1() hint2() hint3() */ * from [testtable]',
+          bindings: [],
+        },
+        pg: {
+          sql: 'select /*+ hint1() hint2() hint3() */ * from "testtable"',
+          bindings: [],
+        },
+        'pg-redshift': {
+          sql: 'select /*+ hint1() hint2() hint3() */ * from "testtable"',
+          bindings: [],
+        },
+      }
+    );
+  });
+
+  it('#4199 - allows hint comments in subqueries', () => {
+    testsql(
+      qb()
+        .select({
+          c1: 'c1',
+          c2: qb().select('c2').from('t2').hintComment('hint2()').limit(1),
+        })
+        .from('t1')
+        .hintComment('hint1()'),
+      {
+        mysql: {
+          sql:
+            'select /*+ hint1() */ `c1` as `c1`, (select /*+ hint2() */ `c2` from `t2` limit ?) as `c2` from `t1`',
+          bindings: [1],
+        },
+        oracledb: {
+          sql:
+            'select /*+ hint1() */ "c1" "c1", (select * from (select /*+ hint2() */ "c2" from "t2") where rownum <= ?) "c2" from "t1"',
+          bindings: [1],
+        },
+        mssql: {
+          sql:
+            'select /*+ hint1() */ [c1] as [c1], (select /*+ hint2() */ top (?) [c2] from [t2]) as [c2] from [t1]',
+          bindings: [1],
+        },
+        pg: {
+          sql:
+            'select /*+ hint1() */ "c1" as "c1", (select /*+ hint2() */ "c2" from "t2" limit ?) as "c2" from "t1"',
+          bindings: [1],
+        },
+        'pg-redshift': {
+          sql:
+            'select /*+ hint1() */ "c1" as "c1", (select /*+ hint2() */ "c2" from "t2" limit ?) as "c2" from "t1"',
+          bindings: [1],
+        },
+      }
+    );
+  });
+
+  it('#4199 - allows hint comments in unions', () => {
+    testsql(
+      qb()
+        .from('t1')
+        .hintComment('hint1()')
+        .unionAll(qb().from('t2').hintComment('hint2()')),
+      {
+        mysql: {
+          sql:
+            'select /*+ hint1() */ * from `t1` union all select /*+ hint2() */ * from `t2`',
+          bindings: [],
+        },
+        oracledb: {
+          sql:
+            'select /*+ hint1() */ * from "t1" union all select /*+ hint2() */ * from "t2"',
+          bindings: [],
+        },
+        mssql: {
+          sql:
+            'select /*+ hint1() */ * from [t1] union all select /*+ hint2() */ * from [t2]',
+          bindings: [],
+        },
+        pg: {
+          sql:
+            'select /*+ hint1() */ * from "t1" union all select /*+ hint2() */ * from "t2"',
+          bindings: [],
+        },
+        'pg-redshift': {
+          sql:
+            'select /*+ hint1() */ * from "t1" union all select /*+ hint2() */ * from "t2"',
+          bindings: [],
+        },
+      }
+    );
+  });
+
+  it('#4199 - forbids "/*", "*/" and "?" in hint comments', () => {
+    expect(() => {
+      qb().from('testtable').hintComment('hint() /*').toString();
+    }).to.throw('Hint comment cannot include "/*" or "*/"');
+    expect(() => {
+      qb().from('testtable').hintComment('hint() */').toString();
+    }).to.throw('Hint comment cannot include "/*" or "*/"');
+    expect(() => {
+      qb().from('testtable').hintComment('hint(?)').toString();
+    }).to.throw('Hint comment cannot include "?"');
+  });
+
+  it('#4199 - forbids non-strings as hint comments', () => {
+    expect(() => {
+      qb().from('testtable').hintComment(47).toString();
+    }).to.throw('Hint comment must be a string');
+    expect(() => {
+      qb()
+        .from('testtable')
+        .hintComment(raw('hint(?)', [47]))
+        .toString();
+    }).to.throw('Hint comment must be a string');
+  });
+
   it('Any undefined binding in a SELECT query should throw an error', () => {
     const qbuilders = [
       {
@@ -8436,7 +10052,6 @@ describe('QueryBuilder', () => {
       }
     );
   });
-
   it("wrapped 'with' clause update", () => {
     testsql(
       qb()
@@ -8447,12 +10062,50 @@ describe('QueryBuilder', () => {
         .where('email', '=', 'foo')
         .from('users'),
       {
+        mysql:
+          'with `withClause` as (select `foo` from `users`) update `users` set `foo` = ? where `email` = ?',
         mssql:
           'with [withClause] as (select [foo] from [users]) update [users] set [foo] = ? where [email] = ?;select @@rowcount',
         sqlite3:
           'with `withClause` as (select `foo` from `users`) update `users` set `foo` = ? where `email` = ?',
         pg:
           'with "withClause" as (select "foo" from "users") update "users" set "foo" = ? where "email" = ?',
+      }
+    );
+  });
+
+  it("wrapped 'withMaterialized' clause update", () => {
+    testsql(
+      qb()
+        .withMaterialized('withClause', function () {
+          this.select('foo').from('users');
+        })
+        .update({ foo: 'updatedFoo' })
+        .where('email', '=', 'foo')
+        .from('users'),
+      {
+        sqlite3:
+          'with `withClause` as materialized (select `foo` from `users`) update `users` set `foo` = ? where `email` = ?',
+        pg:
+          'with "withClause" as materialized (select "foo" from "users") update "users" set "foo" = ? where "email" = ?',
+      }
+    );
+  });
+
+  it("wrapped 'withNotMaterialized' clause update", () => {
+    testsql(
+      qb()
+        .withNotMaterialized('withClause', function () {
+          this.select('foo').from('users');
+        })
+        .update({ foo: 'updatedFoo' })
+        .where('email', '=', 'foo')
+        .from('users'),
+      {
+        sqlite3:
+          'with `withClause` as not materialized (select `foo` from `users`) update `users` set `foo` = ? where `email` = ?',
+        pg:
+          'with "withClause" as not materialized (select "foo" from "users") update "users" set "foo" = ? where "email" = ?',
       }
     );
   });
@@ -8677,16 +10330,40 @@ describe('QueryBuilder', () => {
         .select('*')
         .from('secondWithClause'),
       {
+        // mssql does not allow the RECURSIVE keyword.
         mssql:
-          'with recursive [firstWithClause] as (with recursive [firstWithSubClause] as ((select [foo] from [users]) as [foz]) select * from [firstWithSubClause]), [secondWithClause] as (with recursive [secondWithSubClause] as ((select [bar] from [users]) as [baz]) select * from [secondWithSubClause]) select * from [secondWithClause]',
+          'with [firstWithClause] as (with [firstWithSubClause] as ((select [foo] from [users]) as [foz]) select * from [firstWithSubClause]), [secondWithClause] as (with [secondWithSubClause] as ((select [bar] from [users]) as [baz]) select * from [secondWithSubClause]) select * from [secondWithClause]',
         sqlite3:
           'with recursive `firstWithClause` as (with recursive `firstWithSubClause` as ((select `foo` from `users`) as `foz`) select * from `firstWithSubClause`), `secondWithClause` as (with recursive `secondWithSubClause` as ((select `bar` from `users`) as `baz`) select * from `secondWithSubClause`) select * from `secondWithClause`',
         pg:
           'with recursive "firstWithClause" as (with recursive "firstWithSubClause" as ((select "foo" from "users") as "foz") select * from "firstWithSubClause"), "secondWithClause" as (with recursive "secondWithSubClause" as ((select "bar" from "users") as "baz") select * from "secondWithSubClause") select * from "secondWithClause"',
         'pg-redshift':
           'with recursive "firstWithClause" as (with recursive "firstWithSubClause" as ((select "foo" from "users") as "foz") select * from "firstWithSubClause"), "secondWithClause" as (with recursive "secondWithSubClause" as ((select "bar" from "users") as "baz") select * from "secondWithSubClause") select * from "secondWithClause"',
+        // FIXME: oracledb does not allow the RECURSIVE keyword, but does require a list of column aliases for a recursive query. [#4514]
+        // https://github.com/knex/knex/issues/4514#issuecomment-903727391
         oracledb:
-          'with recursive "firstWithClause" as (with recursive "firstWithSubClause" as ((select "foo" from "users") "foz") select * from "firstWithSubClause"), "secondWithClause" as (with recursive "secondWithSubClause" as ((select "bar" from "users") "baz") select * from "secondWithSubClause") select * from "secondWithClause"',
+          'with "firstWithClause" as (with "firstWithSubClause" as ((select "foo" from "users") "foz") select * from "firstWithSubClause"), "secondWithClause" as (with "secondWithSubClause" as ((select "bar" from "users") "baz") select * from "secondWithSubClause") select * from "secondWithClause"',
+      }
+    );
+  });
+
+  it('Oracle: withRecursive with column list', function () {
+    testsql(
+      qb()
+        .withRecursive('hasColumns', ['id', 'nickname'], function () {
+          this.select('id', 'nickname')
+            .from('users')
+            .unionAll(function () {
+              this.select('id', 'firstname')
+                .from('users')
+                .join('hasColumns', 'hasColumns.nickname', 'users.firstname');
+            });
+        })
+        .select('name')
+        .from('hasColumns'),
+      {
+        oracledb:
+          'with "hasColumns"("id", "nickname") as (select "id", "nickname" from "users" union all select "id", "firstname" from "users" inner join "hasColumns" on "hasColumns"."nickname" = "users"."firstname") select "name" from "hasColumns"',
       }
     );
   });
@@ -8843,9 +10520,7 @@ describe('QueryBuilder', () => {
 
       throw new Error('Should not reach this point');
     } catch (error) {
-      expect(error.message).to.equal(
-        'Cannot chain .first() on "update" query!'
-      );
+      expect(error.message).to.equal('Cannot chain .first() on "update" query');
     }
   });
 
@@ -8855,9 +10530,7 @@ describe('QueryBuilder', () => {
 
       throw new Error('Should not reach this point');
     } catch (error) {
-      expect(error.message).to.equal(
-        'Cannot chain .first() on "insert" query!'
-      );
+      expect(error.message).to.equal('Cannot chain .first() on "insert" query');
     }
   });
 
@@ -8867,7 +10540,7 @@ describe('QueryBuilder', () => {
 
       throw new Error('Should not reach this point');
     } catch (error) {
-      expect(error.message).to.equal('Cannot chain .first() on "del" query!');
+      expect(error.message).to.equal('Cannot chain .first() on "del" query');
     }
   });
 
@@ -8954,40 +10627,6 @@ describe('QueryBuilder', () => {
     }).to.throw(Error);
   });
 
-  it('should warn to user when use `.returning()` function in SQLite3', () => {
-    const loggerConfigForTestingWarnings = {
-      log: {
-        warn: (message) => {
-          if (
-            message ===
-            '.returning() is not supported by sqlite3 and will not have any effect.'
-          ) {
-            throw new Error(message);
-          }
-        },
-      },
-    };
-
-    const sqlite3ClientForWarnings = new SQLite3_Client(
-      Object.assign({ client: 'sqlite3' }, loggerConfigForTestingWarnings)
-    );
-
-    expect(() => {
-      testsql(
-        qb().into('users').insert({ email: 'foo' }).returning('id'),
-        {
-          sqlite3: {
-            sql: 'insert into `users` (`email`) values (?)',
-            bindings: ['foo'],
-          },
-        },
-        {
-          sqlite3: sqlite3ClientForWarnings,
-        }
-      );
-    }).to.throw(Error);
-  });
-
   it('join with subquery using .withSchema', () => {
     testsql(
       qb()
@@ -9015,6 +10654,155 @@ describe('QueryBuilder', () => {
           'select "departments".*, "trainee_cnts"."count" as "trainee_cnt" from "foo"."departments" inner join (select "department_id", count(*) from "foo"."trainees" group by "department_id") as "trainee_cnts" on "trainee_cnts"."department_id" = "departments"."id"',
         oracledb:
           'select "departments".*, "trainee_cnts"."count" "trainee_cnt" from "foo"."departments" inner join (select "department_id", count(*) from "foo"."trainees" group by "department_id") "trainee_cnts" on "trainee_cnts"."department_id" = "departments"."id"',
+      }
+    );
+  });
+
+  it('should join on a subquery with custom conditions and schema', () => {
+    testsql(
+      qb()
+        .withSchema('schema')
+        .select()
+        .from('foo')
+        .join(qb().select(['f_id']).from('baz').as('bar'), (j) =>
+          j.on('bar.f_id', 'foo.id')
+        ),
+      {
+        mysql:
+          'select * from `schema`.`foo` inner join (select `f_id` from `baz`) as `bar` on `bar`.`f_id` = `foo`.`id`',
+        mssql:
+          'select * from [schema].[foo] inner join (select [f_id] from [baz]) as [bar] on [bar].[f_id] = [foo].[id]',
+        oracledb:
+          'select * from "schema"."foo" inner join (select "f_id" from "baz") "bar" on "bar"."f_id" = "foo"."id"',
+        pg:
+          'select * from "schema"."foo" inner join (select "f_id" from "baz") as "bar" on "bar"."f_id" = "foo"."id"',
+        'pg-redshift':
+          'select * from "schema"."foo" inner join (select "f_id" from "baz") as "bar" on "bar"."f_id" = "foo"."id"',
+        sqlite3:
+          'select * from `schema`.`foo` inner join (select `f_id` from `baz`) as `bar` on `bar`.`f_id` = `foo`.`id`',
+      }
+    );
+  });
+
+  it('should join on a subquery defined as a function with custom conditions and schema', () => {
+    testsql(
+      qb()
+        .withSchema('schema')
+        .select()
+        .from('foo')
+        .join(
+          (q) => q.select(['f_id']).from('baz').as('bar'),
+          (j) => j.on('bar.f_id', 'foo.id')
+        ),
+      {
+        mysql:
+          'select * from `schema`.`foo` inner join (select `f_id` from `baz`) as `bar` on `bar`.`f_id` = `foo`.`id`',
+        mssql:
+          'select * from [schema].[foo] inner join (select [f_id] from [baz]) as [bar] on [bar].[f_id] = [foo].[id]',
+        oracledb:
+          'select * from "schema"."foo" inner join (select "f_id" from "baz") "bar" on "bar"."f_id" = "foo"."id"',
+        pg:
+          'select * from "schema"."foo" inner join (select "f_id" from "baz") as "bar" on "bar"."f_id" = "foo"."id"',
+        'pg-redshift':
+          'select * from "schema"."foo" inner join (select "f_id" from "baz") as "bar" on "bar"."f_id" = "foo"."id"',
+        sqlite3:
+          'select * from `schema`.`foo` inner join (select `f_id` from `baz`) as `bar` on `bar`.`f_id` = `foo`.`id`',
+      }
+    );
+  });
+
+  it('should not prepend schema to a subquery', () => {
+    testsql(
+      qb()
+        .withSchema('schema')
+        .select()
+        .from(qb().from('foo').select().as('bar'))
+        .join('baz', 'foo.id', 'bar.foo_id'),
+      {
+        pg:
+          'select * from (select * from "foo") as "bar" inner join "schema"."baz" on "foo"."id" = "bar"."foo_id"',
+        'pg-redshift':
+          'select * from (select * from "foo") as "bar" inner join "schema"."baz" on "foo"."id" = "bar"."foo_id"',
+        mysql:
+          'select * from (select * from `foo`) as `bar` inner join `schema`.`baz` on `foo`.`id` = `bar`.`foo_id`',
+        mssql:
+          'select * from (select * from [foo]) as [bar] inner join [schema].[baz] on [foo].[id] = [bar].[foo_id]',
+        oracledb:
+          'select * from (select * from "foo") "bar" inner join "schema"."baz" on "foo"."id" = "bar"."foo_id"',
+        sqlite3:
+          'select * from (select * from `foo`) as `bar` inner join `schema`.`baz` on `foo`.`id` = `bar`.`foo_id`',
+      }
+    );
+  });
+
+  it('should not prepend schema to a subquery specified by a function', () => {
+    testsql(
+      qb()
+        .withSchema('schema')
+        .select()
+        .from((q) => q.from('foo').select().as('bar'))
+        .join('baz', 'foo.id', 'bar.foo_id'),
+      {
+        pg:
+          'select * from (select * from "foo") as "bar" inner join "schema"."baz" on "foo"."id" = "bar"."foo_id"',
+        'pg-redshift':
+          'select * from (select * from "foo") as "bar" inner join "schema"."baz" on "foo"."id" = "bar"."foo_id"',
+        mysql:
+          'select * from (select * from `foo`) as `bar` inner join `schema`.`baz` on `foo`.`id` = `bar`.`foo_id`',
+        mssql:
+          'select * from (select * from [foo]) as [bar] inner join [schema].[baz] on [foo].[id] = [bar].[foo_id]',
+        oracledb:
+          'select * from (select * from "foo") "bar" inner join "schema"."baz" on "foo"."id" = "bar"."foo_id"',
+        sqlite3:
+          'select * from (select * from `foo`) as `bar` inner join `schema`.`baz` on `foo`.`id` = `bar`.`foo_id`',
+      }
+    );
+  });
+
+  it('should not prepend schema to a raw FROM clause', () => {
+    testsql(
+      qb()
+        .withSchema('schema')
+        .select()
+        .from(raw('bar'))
+        .join('baz', 'foo.id', 'bar.foo_id'),
+      {
+        pg:
+          'select * from bar inner join "schema"."baz" on "foo"."id" = "bar"."foo_id"',
+        'pg-redshift':
+          'select * from bar inner join "schema"."baz" on "foo"."id" = "bar"."foo_id"',
+        mysql:
+          'select * from bar inner join `schema`.`baz` on `foo`.`id` = `bar`.`foo_id`',
+        mssql:
+          'select * from bar inner join [schema].[baz] on [foo].[id] = [bar].[foo_id]',
+        oracledb:
+          'select * from bar inner join "schema"."baz" on "foo"."id" = "bar"."foo_id"',
+        sqlite3:
+          'select * from bar inner join `schema`.`baz` on `foo`.`id` = `bar`.`foo_id`',
+      }
+    );
+  });
+
+  it('should not prepend schema to a raw JOIN clause', () => {
+    testsql(
+      qb()
+        .withSchema('schema')
+        .select()
+        .from('bar')
+        .join(raw('baz'), 'foo.id', 'bar.foo_id'),
+      {
+        pg:
+          'select * from "schema"."bar" inner join baz on "foo"."id" = "bar"."foo_id"',
+        'pg-redshift':
+          'select * from "schema"."bar" inner join baz on "foo"."id" = "bar"."foo_id"',
+        mysql:
+          'select * from `schema`.`bar` inner join baz on `foo`.`id` = `bar`.`foo_id`',
+        mssql:
+          'select * from [schema].[bar] inner join baz on [foo].[id] = [bar].[foo_id]',
+        oracledb:
+          'select * from "schema"."bar" inner join baz on "foo"."id" = "bar"."foo_id"',
+        sqlite3:
+          'select * from `schema`.`bar` inner join baz on `foo`.`id` = `bar`.`foo_id`',
       }
     );
   });
@@ -9125,5 +10913,823 @@ describe('QueryBuilder', () => {
         },
       }
     );
+  });
+
+  describe('deleting with joins', () => {
+    it('should transform joins into "using" syntax with PostgreSQL', () => {
+      // Knex transform joins into "using" syntax for PostgreSQL
+      testsql(
+        qb()
+          .del()
+          .from('users')
+          .join('photos', 'photos.id', 'users.id')
+          .where({ 'user.email': 'mock@example.com' }),
+        {
+          pg: {
+            sql:
+              'delete from "users" using "photos" where "user"."email" = ? and "photos"."id" = "users"."id"',
+            bindings: ['mock@example.com'],
+          },
+        }
+      );
+    });
+
+    it('should transform multiple joins into multiple "using" syntax with PostgreSQL', () => {
+      // Knex transform joins into "using" syntax for PostgreSQL
+      testsql(
+        qb()
+          .del()
+          .from('users')
+          .join('photos', 'photos.id', 'users.id')
+          .join('docs', 'docs.id', 'users.id')
+          .where({ 'user.email': 'mock@example.com' }),
+        {
+          pg: {
+            sql:
+              'delete from "users" using "photos","docs" where "user"."email" = ? and "photos"."id" = "users"."id" and "docs"."id" = "users"."id"',
+            bindings: ['mock@example.com'],
+          },
+        }
+      );
+    });
+
+    it('should join with "using" explicit syntax with PostgreSQL', () => {
+      // explicit using syntax
+      testsql(
+        qb()
+          .del()
+          .from('users')
+          .using('photos')
+          .where({ 'user.email': 'mock@example.com' })
+          .whereRaw('"photos"."id" = "users"."id"'),
+        {
+          pg: {
+            sql:
+              'delete from "users" using "photos" where "user"."email" = ? and "photos"."id" = "users"."id"',
+            bindings: ['mock@example.com'],
+          },
+        }
+      );
+    });
+
+    it('should join with multiple tables and "using" explicit syntax with PostgreSQL', () => {
+      // Test with multiple tables 'using'
+      testsql(
+        qb()
+          .del()
+          .from('users')
+          .using(['photos', 'docs'])
+          .where({
+            'user.email': 'mock@example.com',
+          })
+          .whereRaw(
+            '"photos"."id" = "users"."id" and "docs"."id" = "users"."id"'
+          ),
+        {
+          pg: {
+            sql:
+              'delete from "users" using "photos","docs" where "user"."email" = ? and "photos"."id" = "users"."id" and "docs"."id" = "users"."id"',
+            bindings: ['mock@example.com'],
+          },
+        }
+      );
+    });
+
+    it('should joins with mixed joins and "using" explicit syntax with PostgreSQL', () => {
+      // you can use explicit 'using' and joins, all are merged at the end.
+      testsql(
+        qb()
+          .del()
+          .from('users')
+          .using('photos')
+          .join('docs', 'docs.id', 'users.id')
+          .whereRaw('"photos"."id" = "users"."id"')
+          .where({ 'user.email': 'mock@example.com' }),
+        {
+          pg: {
+            sql:
+              'delete from "users" using "photos","docs" where "photos"."id" = "users"."id" and "user"."email" = ? and "docs"."id" = "users"."id"',
+            bindings: ['mock@example.com'],
+          },
+        }
+      );
+    });
+
+    it('should include join when deleting', () => {
+      testsql(
+        qb()
+          .del()
+          .from('users')
+          .join('photos', 'photos.id', 'users.id')
+          .where({ 'user.email': 'mock@example.com' }),
+        {
+          mysql: {
+            sql:
+              'delete `users` from `users` inner join `photos` on `photos`.`id` = `users`.`id` where `user`.`email` = ?',
+            bindings: ['mock@example.com'],
+          },
+          mssql: {
+            sql:
+              'delete [users] from [users] inner join [photos] on [photos].[id] = [users].[id] where [user].[email] = ?;select @@rowcount',
+            bindings: ['mock@example.com'],
+          },
+          oracledb: {
+            sql:
+              'delete "users" from "users" inner join "photos" on "photos"."id" = "users"."id" where "user"."email" = ?',
+            bindings: ['mock@example.com'],
+          },
+          pg: {
+            sql:
+              'delete from "users" using "photos" where "user"."email" = ? and "photos"."id" = "users"."id"',
+            bindings: ['mock@example.com'],
+          },
+          'pg-redshift': {
+            sql:
+              'delete "users" from "users" inner join "photos" on "photos"."id" = "users"."id" where "user"."email" = ?',
+            bindings: ['mock@example.com'],
+          },
+          sqlite3: {
+            sql:
+              'delete `users` from `users` inner join `photos` on `photos`.`id` = `users`.`id` where `user`.`email` = ?',
+            bindings: ['mock@example.com'],
+          },
+        }
+      );
+    });
+
+    it('should include joins without where clause when deleting #5015', () => {
+      testsql(
+        qb().del().from('users').join('photos', 'photos.id', 'users.id'),
+        {
+          mysql: {
+            sql:
+              'delete `users` from `users` inner join `photos` on `photos`.`id` = `users`.`id`',
+          },
+          mssql: {
+            sql:
+              'delete [users] from [users] inner join [photos] on [photos].[id] = [users].[id];select @@rowcount',
+          },
+          oracledb: {
+            sql:
+              'delete "users" from "users" inner join "photos" on "photos"."id" = "users"."id"',
+          },
+          pg: {
+            sql:
+              'delete from "users" using "photos" where "photos"."id" = "users"."id"',
+            bindings: [],
+          },
+          'pg-redshift': {
+            sql:
+              'delete "users" from "users" inner join "photos" on "photos"."id" = "users"."id"',
+          },
+          sqlite3: {
+            sql:
+              'delete `users` from `users` inner join `photos` on `photos`.`id` = `users`.`id`',
+          },
+        }
+      );
+    });
+
+    it('should include joins clauses with multiple joins with where clause when deleting #5015', () => {
+      testsql(
+        qb()
+          .where('activated', false)
+          .join('accounts', function (jb) {
+            jb.on('accounts.id', 'users.account_id').andOn(
+              'accounts.user_id',
+              'users.id'
+            );
+          })
+          .del(),
+        {
+          mysql: {
+            sql:
+              'delete  from  inner join `accounts` on `accounts`.`id` = `users`.`account_id` and `accounts`.`user_id` = `users`.`id` where `activated` = ?',
+            bindings: [false],
+          },
+          mssql: {
+            sql:
+              'delete  from  inner join [accounts] on [accounts].[id] = [users].[account_id] and [accounts].[user_id] = [users].[id] where [activated] = ?;select @@rowcount',
+            bindings: [false],
+          },
+          oracledb: {
+            sql:
+              'delete  from  inner join "accounts" on "accounts"."id" = "users"."account_id" and "accounts"."user_id" = "users"."id" where "activated" = ?',
+            bindings: [false],
+          },
+          pg: {
+            sql:
+              'delete from  using "accounts" where "activated" = ? and "accounts"."id" = "users"."account_id" and "accounts"."user_id" = "users"."id"',
+            bindings: [false],
+          },
+          'pg-redshift': {
+            sql:
+              'delete  from  inner join "accounts" on "accounts"."id" = "users"."account_id" and "accounts"."user_id" = "users"."id" where "activated" = ?',
+            bindings: [false],
+          },
+          sqlite3: {
+            sql:
+              'delete  from  inner join `accounts` on `accounts`.`id` = `users`.`account_id` and `accounts`.`user_id` = `users`.`id` where `activated` = ?',
+            bindings: [false],
+          },
+        }
+      );
+    });
+
+    it('should include join when deleting with mssql triggers', () => {
+      const triggerOptions = { includeTriggerModifications: true };
+      testsql(
+        qb()
+          .del('*', triggerOptions)
+          .from('users')
+          .join('photos', 'photos.id', 'users.id')
+          .where({ 'user.email': 'mock@example.com' }),
+        {
+          mssql: {
+            sql:
+              'select top(0) [t].* into #out from [users] as t left join [users] on 0=1;delete [users] output deleted.* into #out from [users] inner join [photos] on [photos].[id] = [users].[id] where [user].[email] = ?; select * from #out; drop table #out;',
+            bindings: ['mock@example.com'],
+          },
+        }
+      );
+    });
+  });
+
+  describe('json functions', () => {
+    describe('json manipulation', () => {
+      it('should extract json value', () => {
+        testsql(qb().jsonExtract('name', '$.names.firstName').from('users'), {
+          pg: {
+            sql: 'select jsonb_path_query("name", ?) from "users"',
+            bindings: ['$.names.firstName'],
+          },
+          mysql: {
+            sql: 'select json_unquote(json_extract(`name`, ?)) from `users`',
+            bindings: ['$.names.firstName'],
+          },
+          mssql: {
+            sql: 'select JSON_VALUE([name], ?) from [users]',
+            bindings: ['$.names.firstName'],
+          },
+          oracledb: {
+            sql:
+              'select json_value("name", \'$.names.firstName\') from "users"',
+            bindings: [],
+          },
+          sqlite3: {
+            sql: 'select json_extract(`name`, ?) from `users`',
+            bindings: ['$.names.firstName'],
+          },
+          'pg-redshift': {
+            sql: 'select json_extract_path_text("name", ?, ?) from "users"',
+            bindings: ['names', 'firstName'],
+          },
+          cockroachdb: {
+            sql: 'select json_extract_path("name", ?, ?) from "users"',
+            bindings: ['names', 'firstName'],
+          },
+        });
+      });
+
+      it('should extract json value with alias', () => {
+        testsql(qb().jsonExtract('json_col', '$.name', 'name').from('users'), {
+          pg: {
+            sql:
+              'select jsonb_path_query("json_col", ?) as "name" from "users"',
+            bindings: ['$.name'],
+          },
+          mysql: {
+            sql:
+              'select json_unquote(json_extract(`json_col`, ?)) as `name` from `users`',
+            bindings: ['$.name'],
+          },
+          mssql: {
+            sql: 'select JSON_VALUE([json_col], ?) as [name] from [users]',
+            bindings: ['$.name'],
+          },
+          oracledb: {
+            sql:
+              'select json_value("json_col", \'$.name\') "name" from "users"',
+            bindings: [],
+          },
+          sqlite3: {
+            sql: 'select json_extract(`json_col`, ?) as `name` from `users`',
+            bindings: ['$.name'],
+          },
+          'pg-redshift': {
+            sql:
+              'select json_extract_path_text("json_col", ?) as "name" from "users"',
+            bindings: ['name'],
+          },
+          cockroachdb: {
+            sql:
+              'select json_extract_path("json_col", ?) as "name" from "users"',
+            bindings: ['name'],
+          },
+        });
+      });
+
+      it('should extract json values with mutiple extracts', () => {
+        testsql(
+          qb()
+            .jsonExtract([
+              ['json_col', '$.name', 'name'],
+              ['json_col', '$.last_name', 'last_name'],
+              ['json_col', '$.infos.age', 'age'],
+              ['json_col', '$.infos.gender', 'gender'],
+            ])
+            .from('users'),
+          {
+            pg: {
+              sql:
+                'select jsonb_path_query("json_col", ?) as "name", jsonb_path_query("json_col", ?) as "last_name", ' +
+                'jsonb_path_query("json_col", ?) as "age", jsonb_path_query("json_col", ?) as "gender" from "users"',
+              bindings: [
+                '$.name',
+                '$.last_name',
+                '$.infos.age',
+                '$.infos.gender',
+              ],
+            },
+            mysql: {
+              sql:
+                'select json_unquote(json_extract(`json_col`, ?)) as `name`, json_unquote(json_extract(`json_col`, ?)) ' +
+                'as `last_name`, json_unquote(json_extract(`json_col`, ?)) as `age`, json_unquote(json_extract' +
+                '(`json_col`, ?)) as `gender` from `users`',
+              bindings: [
+                '$.name',
+                '$.last_name',
+                '$.infos.age',
+                '$.infos.gender',
+              ],
+            },
+            mssql: {
+              sql:
+                'select JSON_VALUE([json_col], ?) as [name], JSON_VALUE([json_col], ?) as [last_name], ' +
+                'JSON_VALUE([json_col], ?) as [age], JSON_VALUE([json_col], ?) as [gender] from [users]',
+              bindings: [
+                '$.name',
+                '$.last_name',
+                '$.infos.age',
+                '$.infos.gender',
+              ],
+            },
+            oracledb: {
+              sql:
+                'select json_value("json_col", \'$.name\') "name", json_value("json_col", \'$.last_name\') "last_name",' +
+                ' json_value("json_col", \'$.infos.age\') "age", json_value("json_col", \'$.infos.gender\') "gender" from "users"',
+              bindings: [],
+            },
+            sqlite3: {
+              sql:
+                'select json_extract(`json_col`, ?) as `name`, json_extract(`json_col`, ?) as `last_name`, ' +
+                'json_extract(`json_col`, ?) as `age`, json_extract(`json_col`, ?) as `gender` from `users`',
+              bindings: [
+                '$.name',
+                '$.last_name',
+                '$.infos.age',
+                '$.infos.gender',
+              ],
+            },
+            'pg-redshift': {
+              sql:
+                'select json_extract_path_text("json_col", ?) as "name", ' +
+                'json_extract_path_text("json_col", ?) as "last_name", json_extract_path_text("json_col", ?, ?) as "age", ' +
+                'json_extract_path_text("json_col", ?, ?) as "gender" from "users"',
+              bindings: [
+                'name',
+                'last_name',
+                'infos',
+                'age',
+                'infos',
+                'gender',
+              ],
+            },
+            cockroachdb: {
+              sql:
+                'select json_extract_path("json_col", ?) as "name", json_extract_path("json_col", ?) as "last_name",' +
+                ' json_extract_path("json_col", ?, ?) as "age", json_extract_path("json_col", ?, ?) as "gender" from "users"',
+              bindings: [
+                'name',
+                'last_name',
+                'infos',
+                'age',
+                'infos',
+                'gender',
+              ],
+            },
+          }
+        );
+      });
+
+      it('should set json value', () => {
+        testsql(
+          qb().jsonSet('address', '$.street.numbers[2]', '5').from('users'),
+          {
+            pg: {
+              sql: 'select jsonb_set("address", ?, ?) from "users"',
+              bindings: ['{street,numbers,2}', '5'],
+            },
+            mysql: {
+              sql: 'select json_set(`address`, ?, ?) from `users`',
+              bindings: ['$.street.numbers[2]', '5'],
+            },
+            mssql: {
+              sql: 'select JSON_MODIFY([address], ?, ?) from [users]',
+              bindings: ['$.street.numbers[2]', '5'],
+            },
+            oracledb: {
+              sql: 'select json_transform("address", set ? = ?) from "users"',
+              bindings: ['$.street.numbers[2]', '5'],
+            },
+            sqlite3: {
+              sql: 'select json_set(`address`, ?, ?) from `users`',
+              bindings: ['$.street.numbers[2]', '5'],
+            },
+            cockroachdb: {
+              sql: 'select jsonb_set("address", ?, ?) from "users"',
+              bindings: ['{street,numbers,2}', '5'],
+            },
+          }
+        );
+      });
+
+      it('should set json value with pg path syntax', async function () {
+        testsql(
+          qb().jsonSet('address', '{street,numbers,2}', '5').from('users'),
+          {
+            pg: {
+              sql: 'select jsonb_set("address", ?, ?) from "users"',
+              bindings: ['{street,numbers,2}', '5'],
+            },
+            cockroachdb: {
+              sql: 'select jsonb_set("address", ?, ?) from "users"',
+              bindings: ['{street,numbers,2}', '5'],
+            },
+          }
+        );
+      });
+
+      it('should set json value with nested function', async function () {
+        testsql(
+          qb()
+            .jsonSet(
+              qb().jsonExtract('cities', '$.mainStreet'),
+              '$.street.numbers[1]',
+              "{'test': 2}"
+            )
+            .from('users'),
+          {
+            pg: {
+              sql:
+                'select jsonb_set(jsonb_path_query("cities", ?), ?, ?) from "users"',
+              bindings: ['$.mainStreet', '{street,numbers,1}', "{'test': 2}"],
+            },
+            mysql: {
+              sql:
+                'select json_set(json_unquote(json_extract(`cities`, ?)), ?, ?) from `users`',
+              bindings: ['$.mainStreet', '$.street.numbers[1]', "{'test': 2}"],
+            },
+            mssql: {
+              sql:
+                'select JSON_MODIFY(JSON_VALUE([cities], ?), ?, ?) from [users]',
+              bindings: ['$.mainStreet', '$.street.numbers[1]', "{'test': 2}"],
+            },
+            oracledb: {
+              sql:
+                'select json_transform(json_value("cities", \'$.mainStreet\'), set ? = ?) from "users"',
+              bindings: ['$.street.numbers[1]', "{'test': 2}"],
+            },
+            sqlite3: {
+              sql:
+                'select json_set(json_extract(`cities`, ?), ?, ?) from `users`',
+              bindings: ['$.mainStreet', '$.street.numbers[1]', "{'test': 2}"],
+            },
+            cockroachdb: {
+              sql:
+                'select jsonb_set(json_extract_path("cities", ?), ?, ?) from "users"',
+              bindings: ['mainStreet', '{street,numbers,1}', "{'test': 2}"],
+            },
+          }
+        );
+      });
+
+      it('should insert json', async function () {
+        testsql(qb().jsonInsert('address', '$.mainStreet', '5').from('users'), {
+          pg: {
+            sql: 'select jsonb_insert("address", ?, ?) from "users"',
+            bindings: ['{mainStreet}', '5'],
+          },
+          mysql: {
+            sql: 'select json_insert(`address`, ?, ?) from `users`',
+            bindings: ['$.mainStreet', '5'],
+          },
+          mssql: {
+            sql: 'select JSON_MODIFY([address], ?, ?) from [users]',
+            bindings: ['$.mainStreet', '5'],
+          },
+          oracledb: {
+            sql: 'select json_transform("address", insert ? = ?) from "users"',
+            bindings: ['$.mainStreet', '5'],
+          },
+          sqlite3: {
+            sql: 'select json_insert(`address`, ?, ?) from `users`',
+            bindings: ['$.mainStreet', '5'],
+          },
+          cockroachdb: {
+            sql: 'select jsonb_insert("address", ?, ?) from "users"',
+            bindings: ['{mainStreet}', '5'],
+          },
+        });
+      });
+
+      it('should remove path in json', async function () {
+        testsql(qb().jsonRemove('address', '$.street[1]').from('users'), {
+          pg: {
+            sql: 'select "address" #- ? from "users"',
+            bindings: ['{street,1}'],
+          },
+          mysql: {
+            sql: 'select json_remove(`address`,?) from `users`',
+            bindings: ['$.street[1]'],
+          },
+          mssql: {
+            sql: 'select JSON_MODIFY([address],?, NULL) from [users]',
+            bindings: ['$.street[1]'],
+          },
+          oracledb: {
+            sql: 'select json_transform("address", remove ?) from "users"',
+            bindings: ['$.street[1]'],
+          },
+          sqlite3: {
+            sql: 'select json_remove(`address`,?) from `users`',
+            bindings: ['$.street[1]'],
+          },
+          cockroachdb: {
+            sql: 'select "address" #- ? from "users"',
+            bindings: ['{street,1}'],
+          },
+        });
+      });
+
+      it('should insert then extract', async function () {
+        testsql(
+          qb()
+            .jsonExtract(
+              qb().jsonInsert('population', '$.test', '1234'),
+              '$.test',
+              'insertExtract'
+            )
+            .from('cities'),
+          {
+            pg: {
+              sql:
+                'select jsonb_path_query(jsonb_insert("population", ?, ?), ?) as "insertExtract" from "cities"',
+              bindings: ['{test}', '1234', '$.test'],
+            },
+            mysql: {
+              sql:
+                'select json_unquote(json_extract(json_insert(`population`, ?, ?), ?)) as `insertExtract` from `cities`',
+              bindings: ['$.test', '1234', '$.test'],
+            },
+            mssql: {
+              sql:
+                'select JSON_VALUE(JSON_MODIFY([population], ?, ?), ?) as [insertExtract] from [cities]',
+              bindings: ['$.test', '1234', '$.test'],
+            },
+            oracledb: {
+              sql:
+                'select json_value(json_transform("population", insert ? = ?), \'$.test\') "insertExtract" from "cities"',
+              bindings: ['$.test', '1234'],
+            },
+            sqlite3: {
+              sql:
+                'select json_extract(json_insert(`population`, ?, ?), ?) as `insertExtract` from `cities`',
+              bindings: ['$.test', '1234', '$.test'],
+            },
+            cockroachdb: {
+              sql:
+                'select json_extract_path(jsonb_insert("population", ?, ?), ?) as "insertExtract" from "cities"',
+              bindings: ['{test}', '1234', 'test'],
+            },
+          }
+        );
+      });
+    });
+
+    describe('where json', function () {
+      it('where equals json', async function () {
+        testsql(
+          qb()
+            .select()
+            .from('users')
+            .whereJsonObject('address', { street: 'street1', number: 5 })
+            .orWhereNotJsonObject('address', {
+              street: 'street2',
+              number: 7,
+            }),
+          {
+            pg: {
+              sql:
+                'select * from "users" where "address" = ? or "address" != ?',
+              bindings: [
+                '{"street":"street1","number":5}',
+                '{"street":"street2","number":7}',
+              ],
+            },
+            mysql: {
+              sql:
+                'select * from `users` where json_contains(`address`, ?) or not json_contains(`address`, ?)',
+              bindings: [
+                '{"street":"street1","number":5}',
+                '{"street":"street2","number":7}',
+              ],
+            },
+            mssql: {
+              sql:
+                'select * from [users] where [address] = ? or [address] != ?',
+              bindings: [
+                '{"street":"street1","number":5}',
+                '{"street":"street2","number":7}',
+              ],
+            },
+            oracledb: {
+              sql:
+                'select * from "users" where "address" = ? or "address" != ?',
+              bindings: [
+                '{"street":"street1","number":5}',
+                '{"street":"street2","number":7}',
+              ],
+            },
+            sqlite3: {
+              sql:
+                'select * from `users` where `address` = ? or `address` != ?',
+              bindings: [
+                '{"street":"street1","number":5}',
+                '{"street":"street2","number":7}',
+              ],
+            },
+            cockroachdb: {
+              sql:
+                'select * from "users" where "address" = ? or "address" != ?',
+              bindings: [
+                '{"street":"street1","number":5}',
+                '{"street":"street2","number":7}',
+              ],
+            },
+          }
+        );
+      });
+
+      it('where json column is equals to the value returned by a json path', async function () {
+        testsql(
+          qb()
+            .select()
+            .from('users')
+            .whereJsonPath('address', '$.street.number', '>', 5),
+          {
+            pg: {
+              sql:
+                'select * from "users" where jsonb_path_query_first("address", ?)::int > ?',
+              bindings: ['$.street.number', 5],
+            },
+            mysql: {
+              sql: 'select * from `users` where json_extract(`address`, ?) > ?',
+              bindings: ['$.street.number', 5],
+            },
+            mssql: {
+              sql: 'select * from [users] where JSON_VALUE([address], ?) > ?',
+              bindings: ['$.street.number', 5],
+            },
+            oracledb: {
+              sql:
+                'select * from "users" where json_value("address", \'$.street.number\') > ?',
+              bindings: [5],
+            },
+            sqlite3: {
+              sql: 'select * from `users` where json_extract(`address`, ?) > ?',
+              bindings: ['$.street.number', 5],
+            },
+            cockroachdb: {
+              sql:
+                'select * from "users" where json_extract_path("address", ?, ?)::int > ?',
+              bindings: ['street', 'number', 5],
+            },
+          }
+        );
+      });
+
+      it('where a json column is a superset of value', async function () {
+        testsql(
+          qb()
+            .select()
+            .from('users')
+            .whereJsonSupersetOf('address', { test: 'value' }),
+          {
+            pg: {
+              sql: 'select * from "users" where "address" @> ?',
+              bindings: ['{"test":"value"}'],
+            },
+            mysql: {
+              sql: 'select * from `users` where json_contains(`address`,?)',
+              bindings: ['{"test":"value"}'],
+            },
+            cockroachdb: {
+              sql: 'select * from "users" where "address" @> ?',
+              bindings: ['{"test":"value"}'],
+            },
+          }
+        );
+      });
+
+      it('where a json column is a superset of value', async function () {
+        testsql(
+          qb().select().from('users').whereJsonSupersetOf('address', 'test'),
+          {
+            pg: {
+              sql: 'select * from "users" where "address" @> ?',
+              bindings: ['test'],
+            },
+            mysql: {
+              sql: 'select * from `users` where json_contains(`address`,?)',
+              bindings: ['test'],
+            },
+            cockroachdb: {
+              sql: 'select * from "users" where "address" @> ?',
+              bindings: ['test'],
+            },
+          }
+        );
+      });
+
+      it('where a json column is not a superset of value', async function () {
+        testsql(
+          qb()
+            .select()
+            .from('users')
+            .whereJsonNotSupersetOf('address', { test: 'value' }),
+          {
+            pg: {
+              sql: 'select * from "users" where not "address" @> ?',
+              bindings: ['{"test":"value"}'],
+            },
+            mysql: {
+              sql: 'select * from `users` where not json_contains(`address`,?)',
+              bindings: ['{"test":"value"}'],
+            },
+            cockroachdb: {
+              sql: 'select * from "users" where not "address" @> ?',
+              bindings: ['{"test":"value"}'],
+            },
+          }
+        );
+      });
+
+      it('where a json column be a subset of value', async function () {
+        testsql(
+          qb()
+            .select()
+            .from('users')
+            .whereJsonSubsetOf('address', { test: 'value' }),
+          {
+            pg: {
+              sql: 'select * from "users" where "address" <@ ?',
+              bindings: ['{"test":"value"}'],
+            },
+            mysql: {
+              sql: 'select * from `users` where json_contains(?,`address`)',
+              bindings: ['{"test":"value"}'],
+            },
+            cockroachdb: {
+              sql: 'select * from "users" where "address" <@ ?',
+              bindings: ['{"test":"value"}'],
+            },
+          }
+        );
+      });
+
+      it('where a json column is not subset of value', async function () {
+        testsql(
+          qb()
+            .select()
+            .from('users')
+            .whereJsonNotSubsetOf('address', { test: 'value' }),
+          {
+            pg: {
+              sql: 'select * from "users" where not "address" <@ ?',
+              bindings: ['{"test":"value"}'],
+            },
+            mysql: {
+              sql: 'select * from `users` where not json_contains(?,`address`)',
+              bindings: ['{"test":"value"}'],
+            },
+            cockroachdb: {
+              sql: 'select * from "users" where not "address" <@ ?',
+              bindings: ['{"test":"value"}'],
+            },
+          }
+        );
+      });
+    });
   });
 });
