@@ -1,6 +1,6 @@
 {
   "name": "@itdeptutahcountygovernment/knex",
-  "version": "0.21.9",
+  "version": "0.21.10",
   "description": "A batteries-included SQL query & schema builder for Postgres, MySQL and SQLite3 and the Browser",
   "main": "knex.js",
   "types": "types/index.d.ts",
@@ -46,7 +46,6 @@
     "pg-connection-string": "2.3.0",
     "tarn": "^3.0.1",
     "tildify": "2.0.0",
-    "uuid": "^7.0.3",
     "v8flags": "^3.2.0"
   },
   "peerDependencies": {
@@ -175,7 +174,8 @@
     "CHANGELOG.md",
     "scripts/*",
     "types/index.d.ts",
-    "types/result.d.ts"
+    "types/result.d.ts",
+    "types/tables.d.ts"
   ],
   "license": "MIT",
   "tonicExampleFilename": "scripts/runkit-example.js",
