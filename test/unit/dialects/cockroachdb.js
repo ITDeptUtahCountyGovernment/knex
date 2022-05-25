@@ -69,8 +69,7 @@ describe('CockroachDB unit tests', () => {
     const compiler = knexInstance.client.queryCompiler(qb);
     const sql = compiler.upsert();
     expect(sql).to.eql({
-      sql:
-        'upsert into "fakeTable" ("a", "b") values (?, DEFAULT), (DEFAULT, ?) returning "a", "b"',
+      sql: 'upsert into "fakeTable" ("a", "b") values (?, DEFAULT), (DEFAULT, ?) returning "a", "b"',
       returning: ['a', 'b'],
     });
   });

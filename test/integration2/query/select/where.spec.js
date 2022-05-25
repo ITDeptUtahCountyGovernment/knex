@@ -684,14 +684,16 @@ describe('Where', function () {
         });
 
         it('where json object with string object', async () => {
-          const result = await knex('cities').select('name').whereJsonObject(
-            'descriptions',
-            `{
+          const result = await knex('cities')
+            .select('name')
+            .whereJsonObject(
+              'descriptions',
+              `{
               "type": "bigcity",
               "short": "beautiful city",
               "long": "beautiful and dirty city"
             }`
-          );
+            );
           expect(result[0]).to.eql({
             name: 'Paris',
           });

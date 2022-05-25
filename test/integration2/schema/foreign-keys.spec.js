@@ -86,8 +86,7 @@ describe('Schema', () => {
               expect(queries.sql).to.eql([
                 {
                   bindings: [],
-                  sql:
-                    'alter table "foreign_keys_table_one" add constraint "fk_fkey_threeee" foreign key ("fkey_three") references "foreign_keys_table_three" ("id")',
+                  sql: 'alter table "foreign_keys_table_one" add constraint "fk_fkey_threeee" foreign key ("fkey_three") references "foreign_keys_table_three" ("id")',
                 },
               ]);
             }

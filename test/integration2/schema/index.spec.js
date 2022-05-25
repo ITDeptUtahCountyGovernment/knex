@@ -171,15 +171,13 @@ describe('Schema', () => {
                   type: 'index',
                   name: 'index_table_one_column_one_index',
                   tbl_name: 'index_table_one',
-                  sql:
-                    'CREATE INDEX `index_table_one_column_one_index` on `index_table_one` (`column_one`)',
+                  sql: 'CREATE INDEX `index_table_one_column_one_index` on `index_table_one` (`column_one`)',
                 },
                 {
                   type: 'index',
                   name: 'index_table_one_column_two_column_three_index',
                   tbl_name: 'index_table_one',
-                  sql:
-                    'CREATE INDEX `index_table_one_column_two_column_three_index` on `index_table_one` (`column_three`)',
+                  sql: 'CREATE INDEX `index_table_one_column_two_column_three_index` on `index_table_one` (`column_three`)',
                 },
               ];
               const indicesTwoBeforeWithoutIndex = [
@@ -187,15 +185,13 @@ describe('Schema', () => {
                   type: 'index',
                   name: 'index_table_two_column_one_unique',
                   tbl_name: 'index_table_two',
-                  sql:
-                    'CREATE UNIQUE INDEX `index_table_two_column_one_unique` on `index_table_two` (`column_one`)',
+                  sql: 'CREATE UNIQUE INDEX `index_table_two_column_one_unique` on `index_table_two` (`column_one`)',
                 },
                 {
                   type: 'index',
                   name: 'index_table_two_column_two_column_three_unique',
                   tbl_name: 'index_table_two',
-                  sql:
-                    'CREATE UNIQUE INDEX `index_table_two_column_two_column_three_unique` on `index_table_two` (`column_three`)',
+                  sql: 'CREATE UNIQUE INDEX `index_table_two_column_two_column_three_unique` on `index_table_two` (`column_three`)',
                 },
               ];
 

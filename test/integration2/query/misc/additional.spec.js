@@ -1145,7 +1145,8 @@ describe('Additional', function () {
               message: `After query timeout of ${queryTimeout}ms exceeded, cancelling of query failed.`,
             });
 
-            knexPrototype._wrappedCancelQueryCall = originalWrappedCancelQueryCall;
+            knexPrototype._wrappedCancelQueryCall =
+              originalWrappedCancelQueryCall;
 
             try {
               await getTestQuery().timeout(secondQueryTimeout, {

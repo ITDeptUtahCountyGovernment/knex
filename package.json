@@ -4,9 +4,6 @@
   "description": "A batteries-included SQL query & schema builder for PostgresSQL, MySQL, CockroachDB, MSSQL and SQLite3",
   "main": "knex",
   "types": "types/index.d.ts",
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com/"
-  },
   "engines": {
     "node": ">=12"
   },
@@ -154,7 +151,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git://github.com/ITDeptUtahCountyGovernment/knex"
+    "url": "git://github.com/knex/knex.git"
   },
   "homepage": "https://knex.github.io/documentation/",
   "keywords": [
@@ -173,7 +170,10 @@
     "db",
     "database"
   ],
-  "author": "Tim Griesser (https://github.com/tgriesser)",
+  "author": {
+    "name": "Tim Griesser",
+    "web": "https://github.com/tgriesser"
+  },
   "contributors": [
     {
       "name": "Mikael Lepisto"

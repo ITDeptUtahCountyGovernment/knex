@@ -326,12 +326,14 @@ describe('Schema (misc)', () => {
           it('copy table with additionnal column', async () => {
             await knex.schema.dropTableIfExists('table_copied');
             await knex.schema
-              .createTableLike('table_copied', 'table_to_copy', function (
-                table
-              ) {
-                table.text('add_col');
-                table.integer('add_num_col');
-              })
+              .createTableLike(
+                'table_copied',
+                'table_to_copy',
+                function (table) {
+                  table.text('add_col');
+                  table.integer('add_num_col');
+                }
+              )
               .testSql((tester) => {
                 tester('mysql', [
                   'create table `table_copied` like `table_to_copy`',

@@ -59,8 +59,7 @@ describe('Schema', () => {
               expect(queries.sql).to.eql([
                 {
                   bindings: [],
-                  sql:
-                    'alter table "primary_table" alter column "id_not_nullable" drop not null',
+                  sql: 'alter table "primary_table" alter column "id_not_nullable" drop not null',
                 },
               ]);
             }
