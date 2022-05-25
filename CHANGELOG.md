@@ -1,5 +1,70 @@
 # Master (Unreleased)
 
+# 2.0.0 - 21 April, 2022
+
+### Breaking changes
+
+- Restore sqlite3 package #5136
+
+### Test / internal changes:
+
+- Migrate Husky from 4 to 7 #5137
+- Migrate Jake to 10.8.5 #5138
+
+# 1.0.7 - 13 April, 2022
+
+### Bug fixes:
+
+- CLI: Fix cli migrate:make SQLite dependency #5106
+
+# 1.0.6 - 12 April, 2022
+
+### Bug fixes:
+
+- PostgreSQL: Wait for search path to be set before returning connection #5107
+- CLI: No client override during migrate:make #5109
+
+# 1.0.5 - 05 April, 2022
+
+### New features:
+
+- Override knexfile options with CLI options #4047
+
+### Bug fixes:
+
+- Stringify json value in update #5063
+- Fix isModuleType() for yarn #4447
+- Wrapped Unions Fixes #5072
+- SQLite: Fix @vscode-sqlite3 error message #5081
+- CLI: Fix completed migration listing #5060
+
+### Typings:
+
+- Make default generic parameters of `Knex` match the generic parameter types of `knex` #5021
+- Update knex types for TS 4.7 #5095
+
+# 1.0.4 - 13 March, 2022
+
+### New features:
+
+- Add whereLike functions #5044
+
+### Bug fixes:
+
+- Fix orWhereJsonPath clause #5022
+- Subquery in on clause missing parenthesis #5049
+- Rework Union Wrapping #5030
+- Oracle: Fix batch inserts with DEFAULT values with OracleDB #2592 #5037
+
+### Typings:
+
+- Fix types for "returning" methods #5031
+- createTableLike callback should be optional #5055
+
+### Documentation:
+
+- Website URL changed to https://knex.github.io/documentation/
+
 # 1.0.3 - 11 February, 2022
 
 ### Bug fixes:
