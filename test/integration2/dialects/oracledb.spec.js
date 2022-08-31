@@ -1,5 +1,6 @@
 const { expect } = require('chai');
 const { getAllDbs, getKnexForDb } = require('../util/knex-instance-provider');
+const oracledb = require('oracledb');
 
 describe('Oracledb dialect', () => {
   describe('Connection configuration', () => {
@@ -25,8 +26,7 @@ describe('Oracledb dialect', () => {
             // to silent dropping of the Buffer.
             expect(queryObj.bindings.length).to.eql(2);
             expect(queryObj).to.eql({
-              sql:
-                'insert into "table1" ("value") values (:1) returning "value" into :2',
+              sql: 'insert into "table1" ("value") values (:1) returning "value" into :2',
               bindings: [b, { type: 2019, dir: 3003 }],
             });
           });
@@ -57,6 +57,32 @@ describe('Oracledb dialect', () => {
             expect(client.version).to.match(/^\d+\.\d+$/);
           });
         });
+      });
+    });
+  });
+
+  describe('Client', () => {
+    let knex;
+
+    before(() => {
+      knex = getKnexForDb('oracledb');
+    });
+
+    after(() => {
+      return knex.destroy();
+    });
+
+    describe('#5123 options not passed to driver', () => {
+      it('should pass values supplied to .options() to the driver', async () => {
+        const query = knex
+          .raw("select DATE '2022-05-25' as TEST_DATE from dual")
+          .options({ fetchInfo: { TEST_DATE: { type: oracledb.STRING } } });
+        const [{ TEST_DATE: testDate }] = await query;
+
+        expect(query.toSQL().options).to.deep.equal({
+          fetchInfo: { TEST_DATE: { type: oracledb.STRING } },
+        });
+        expect(testDate).to.be.a('string');
       });
     });
   });
