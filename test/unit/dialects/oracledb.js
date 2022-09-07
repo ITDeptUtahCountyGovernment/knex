@@ -1,211 +1,91 @@
-'use strict';
-const _ = require('lodash');
-const expect = require('chai').expect;
-const knex = require('../../../knex');
-const config = require('../../knexfile');
-const sinon = require('sinon');
+const { expect } = require('chai');
+const Oracle_Client = require('../../../lib/dialects/oracledb');
+const { NameHelper } = require('../../../lib/dialects/oracle/utils');
+const client = new Oracle_Client({ client: 'oracledb' });
 
-describe('OracleDb externalAuth', function () {
-  const knexInstance = knex({
-    client: 'oracledb',
-    connection: {
-      user: 'user',
-      password: 'password',
-      connectString: 'connect-string',
-      externalAuth: true,
-      host: 'host',
-      database: 'database',
-    },
-  });
-  let spy;
+describe('OracleDB Unit Tests', () => {
+  describe('Client', () => {
+    describe('Version Parsing', () => {
+      const fakeBadVersionQueryConnection = {
+        execute: function () {
+          const cb = arguments[arguments.length - 1];
+          cb(null, {
+            rows: [
+              [
+                'Oracle Database Bad Version String That Should Not Happen Unless Something Is Very Wrong',
+              ],
+            ],
+          });
+        },
+      };
 
-  before(function () {
-    spy = sinon.spy(knexInstance.client.driver, 'getConnection');
-  });
-
-  it('externalAuth and connectString should be sent to the getConnection', function () {
-    const connectionWithExternalAuth = {
-      connectString: 'connect-string',
-      externalAuth: true,
-    };
-    knexInstance.client.acquireRawConnection().then(
-      function (resolve) {},
-      function (reject) {}
-    );
-    expect(spy).to.have.callCount(1);
-    expect(spy).to.have.been.calledWith(connectionWithExternalAuth);
-  });
-
-  after(function () {
-    knexInstance.client.driver.getConnection.restore();
-  });
-});
-
-describe('OracleDb parameters', function () {
-  describe('with fetchAsString parameter ', function () {
-    let knexClient;
-
-    before(function () {
-      const conf = _.clone(config.oracledb);
-      conf.fetchAsString = ['number', 'DATE', 'cLOb', 'BUFFER'];
-      knexClient = knex(conf);
-      return knexClient;
-    });
-
-    it('on float', function () {
-      return knexClient
-        .raw('select 7.329 as "field" from dual')
-        .then(function (result) {
-          expect(result[0]).to.be.ok;
-          expect(result[0].field).to.be.a('string');
+      it('should set its version to null if version in options is invalid', () => {
+        const client = new Oracle_Client({
+          client: 'oracledb',
+          version: 'invalid',
         });
-    });
 
-    it('on date', function () {
-      return knexClient
-        .raw('select CURRENT_DATE as "field" from dual')
-        .then(function (result) {
-          expect(result[0]).to.be.ok;
-          expect(result[0].field).to.be.a('string');
-        });
-    });
-
-    it('on clob', function () {
-      return knexClient
-        .raw('select TO_CLOB(\'LONG CONTENT\') as "field" from dual')
-        .then(function (result) {
-          expect(result[0]).to.be.ok;
-          expect(result[0].field).to.be.equal('LONG CONTENT');
-        });
-    });
-
-    it('on raw', function () {
-      return knexClient
-        .raw('select UTL_RAW.CAST_TO_RAW(3) as "field" from dual')
-        .then(function (result) {
-          expect(result[0]).to.be.ok;
-          expect(result[0].field).to.be.equal('33');
-        });
-    });
-
-    after(function () {
-      return knexClient.destroy();
-    });
-  });
-
-  describe('without fetchAsString parameter', function () {
-    let knexClient;
-
-    before(function () {
-      knexClient = knex(config.oracledb);
-      return knexClient;
-    });
-
-    it('on float', function () {
-      return knexClient
-        .raw('select 7.329 as "field" from dual')
-        .then(function (result) {
-          expect(result[0]).to.be.ok;
-          expect(result[0].field).to.not.be.a('string');
-        });
-    });
-
-    it('on date', function () {
-      return knexClient
-        .raw('select CURRENT_DATE as "field" from dual')
-        .then(function (result) {
-          expect(result[0]).to.be.ok;
-          expect(result[0].field).to.not.be.a('string');
-        });
-    });
-
-    it('on blob', async () => {
-      const result = await knexClient.raw(
-        'select TO_BLOB(\'67c1a1acaaca11a1b36fa6636166709b\') as "field" from dual'
-      );
-      expect(result[0]).to.be.ok;
-      expect(result[0].field.toString('hex')).to.be.equal(
-        '67c1a1acaaca11a1b36fa6636166709b'
-      );
-    });
-
-    it('on raw', function () {
-      return knexClient
-        .raw('select UTL_RAW.CAST_TO_RAW(3) as "field" from dual')
-        .then(function (result) {
-          expect(result[0]).to.be.ok;
-          expect(result[0].field).to.be.instanceOf(Buffer);
-        });
-    });
-
-    after(function () {
-      return knexClient.destroy();
-    });
-  });
-});
-
-describe('OracleDb unit tests', function () {
-  let knexClient;
-
-  before(function () {
-    const conf = _.clone(config.oracledb);
-    conf.fetchAsString = ['number', 'DATE', 'cLOb', 'BUFFER'];
-    knexClient = knex(conf);
-    return knexClient;
-  });
-
-  it('disposes the connection on connection error', async function () {
-    let spy = sinon.spy();
-    // call the real acquireConnection but release the connection immediately to cause connection error
-    const acquireConnection = knexClient.client.acquireConnection;
-    sinon.stub(knexClient.client, 'acquireConnection').callsFake(async () => {
-      const conn = await acquireConnection.call(knexClient.client);
-      conn.release();
-      spy = sinon.spy(conn, 'close');
-      return conn;
-    });
-
-    let exception;
-    try {
-      await knexClient.raw('insert into DUAL values(1)');
-    } catch (e) {
-      exception = e;
-    }
-
-    expect(exception).not.to.equal(undefined);
-    expect(exception.message).to.include('NJS-003: invalid connection');
-    expect(spy.callCount).to.equal(1);
-  });
-
-  it('clears the connection from the pool on disconnect during commit', async function () {
-    const err = 'error message';
-    const spy = sinon.spy(knexClient.client, 'releaseConnection');
-    // call the real acquireConnection but ensure commitAsync fails simulating a disconnect
-    const acquireConnection = knexClient.client.acquireConnection;
-    sinon.stub(knexClient.client, 'acquireConnection').callsFake(async () => {
-      const conn = await acquireConnection.call(knexClient.client);
-      conn.commitAsync = () => Promise.reject(err);
-      return conn;
-    });
-
-    let exception;
-    try {
-      await knexClient.transaction(async (trx) => {
-        await trx('DUAL').select('*');
+        expect(client.version).to.be.null;
       });
-    } catch (e) {
-      exception = e;
-    }
 
-    expect(spy.callCount).to.equal(1);
-    expect(exception).to.equal(err);
+      it('should return the version provided in options if given from .checkVersion()', async () => {
+        const client = new Oracle_Client({
+          client: 'oracledb',
+          version: '1.13',
+        });
+        const version = await client.checkVersion();
+
+        expect(version).to.equal(client.version);
+      });
+
+      it('should strip off any character suffixes from versions', () => {
+        expect(client._parseVersion('12c')).to.equal('12');
+      });
+
+      it('should error indicating the need to specify a version if it could not be auto-detected', async () => {
+        const client = new Oracle_Client({ client: 'oracledb' });
+        try {
+          await client.checkVersion(fakeBadVersionQueryConnection);
+          expect.fail('.checkVersion should have rejected.');
+        } catch (err) {
+          expect(err.message).to.match(
+            /^Unable to detect .* version .* specify the version/
+          );
+        }
+      });
+
+      it('should require a valid version if it could not be auto-detected and provided version is invalid', async () => {
+        const client = new Oracle_Client({
+          client: 'oracledb',
+          version: 'bad version',
+        });
+        try {
+          await client.checkVersion(fakeBadVersionQueryConnection);
+          expect.fail('.checkVersion should have rejected.');
+        } catch (err) {
+          expect(err.message).to.match(
+            /^Invalid .* version number .* Unable to successfully auto-detect/
+          );
+        }
+      });
+    });
   });
 
-  afterEach(function () {
-    knexClient.client.acquireConnection.restore();
-  });
+  describe('Name Generation', () => {
+    it('should use a 128 character name limit for Oracle 12.2 and above', () => {
+      const ora122NameHelper = new NameHelper('12.2');
+      const oraNameHelper = new NameHelper('18');
 
-  after(function () {
-    return knexClient.destroy();
+      expect(ora122NameHelper.limit).to.equal(128);
+      expect(oraNameHelper.limit).to.equal(128);
+    });
+
+    it('should use a 30 character name limit for Oracle 12.1 and below', () => {
+      const ora121NameHelper = new NameHelper('12.1');
+      const ora11NameHelper = new NameHelper('11.3');
+
+      expect(ora121NameHelper.limit).to.equal(30);
+      expect(ora11NameHelper.limit).to.equal(30);
+    });
   });
 });

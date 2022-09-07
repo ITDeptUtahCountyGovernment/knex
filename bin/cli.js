@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-/* eslint no-console:0, no-var:0 */
-const Liftoff = require('liftoff');
+const rechoir = require('rechoir');
+const merge = require('lodash/merge');
 const interpret = require('interpret');
+const resolveFrom = require('resolve-from');
 const path = require('path');
 const tildify = require('tildify');
 const commander = require('commander');
@@ -9,21 +10,29 @@ const color = require('colorette');
 const argv = require('getopts')(process.argv.slice(2));
 const cliPkg = require('../package');
 const {
+  parseConfigObj,
   mkConfigObj,
   resolveEnvironmentConfig,
   exit,
   success,
   checkLocalModule,
+  checkConfigurationOptions,
   getMigrationExtension,
   getSeedExtension,
   getStubPath,
+  findUpModulePath,
+  findUpConfig,
 } = require('./utils/cli-config-utils');
-const { readFile, writeFile } = require('./../lib/util/fs');
+const {
+  existsSync,
+  readFile,
+  writeFile,
+} = require('../lib/migrations/util/fs');
 
 const { listMigrations } = require('./utils/migrationsLister');
 
 async function openKnexfile(configPath) {
-  const importFile = require('../lib/util/import-file'); // require me late!
+  const importFile = require('../lib/migrations/util/import-file'); // require me late!
   let config = await importFile(configPath);
   if (config && config.default) {
     config = config.default;
@@ -34,7 +43,7 @@ async function openKnexfile(configPath) {
   return config;
 }
 
-async function initKnex(env, opts) {
+async function initKnex(env, opts, useDefaultClientIfNotSpecified) {
   checkLocalModule(env);
   if (process.cwd() !== env.cwd) {
     process.chdir(env.cwd);
@@ -42,6 +51,10 @@ async function initKnex(env, opts) {
       'Working directory changed to',
       color.magenta(tildify(env.cwd))
     );
+  }
+
+  if (!useDefaultClientIfNotSpecified) {
+    checkConfigurationOptions(env, opts);
   }
 
   env.configuration = env.configPath
@@ -53,14 +66,80 @@ async function initKnex(env, opts) {
     env.configuration,
     env.configPath
   );
+
+  const optionsConfig = parseConfigObj(opts);
+  const config = merge(resolvedConfig, optionsConfig);
+
+  // Migrations directory gets defaulted if it is undefined.
+  if (!env.configPath && !config.migrations.directory) {
+    config.migrations.directory = null;
+  }
+
+  // Client gets defaulted if undefined and it's allowed
+  if (useDefaultClientIfNotSpecified && config.client === undefined) {
+    config.client = 'sqlite3';
+  }
+
   const knex = require(env.modulePath);
-  return knex(resolvedConfig);
+  return knex(config);
 }
 
-function invoke(env) {
-  env.modulePath = env.modulePath || env.knexpath || process.env.KNEX_PATH;
-
+function invoke() {
   const filetypes = ['js', 'coffee', 'ts', 'eg', 'ls'];
+
+  const cwd = argv.knexfile
+    ? path.dirname(path.resolve(argv.knexfile))
+    : process.cwd();
+
+  // TODO add knexpath here eventually
+  const modulePath =
+    resolveFrom.silent(cwd, 'knex') ||
+    findUpModulePath(cwd, 'knex') ||
+    process.env.KNEX_PATH;
+
+  const configPath =
+    argv.knexfile && existsSync(argv.knexfile)
+      ? path.resolve(argv.knexfile)
+      : findUpConfig(cwd, 'knexfile', filetypes);
+
+  if (configPath) {
+    const autoloads = rechoir.prepare(
+      interpret.jsVariants,
+      configPath,
+      cwd,
+      true
+    );
+    if (autoloads instanceof Error) {
+      // Only errors
+      autoloads.failures.forEach(function (failed) {
+        console.log(
+          color.red('Failed to load external module'),
+          color.magenta(failed.moduleName)
+        );
+      });
+    } else if (Array.isArray(autoloads)) {
+      const succeeded = autoloads[autoloads.length - 1];
+      console.log(
+        'Requiring external module',
+        color.magenta(succeeded.moduleName)
+      );
+    }
+  }
+
+  const env = {
+    cwd,
+    modulePath,
+    configPath,
+    configuration: null,
+  };
+
+  let modulePackage = {};
+  try {
+    modulePackage = require(path.join(
+      path.dirname(env.modulePath),
+      'package.json'
+    ));
+  } catch (e) {}
 
   const cliVersion = [
     color.blue('Knex CLI version:'),
@@ -69,7 +148,7 @@ function invoke(env) {
 
   const localVersion = [
     color.blue('Knex Local version:'),
-    color.green(env.modulePackage.version || 'None'),
+    color.green(modulePackage.version || 'None'),
   ].join(' ');
 
   commander
@@ -78,16 +157,10 @@ function invoke(env) {
     .option('--knexfile [path]', 'Specify the knexfile path.')
     .option('--knexpath [path]', 'Specify the path to knex instance.')
     .option('--cwd [path]', 'Specify the working directory.')
-    .option('--client [name]', 'Set DB client without a knexfile.')
-    .option('--connection [address]', 'Set DB connection without a knexfile.')
-    .option(
-      '--migrations-directory [path]',
-      'Set migrations directory without a knexfile.'
-    )
-    .option(
-      '--migrations-table-name [path]',
-      'Set migrations table name without a knexfile.'
-    )
+    .option('--client [name]', 'Set DB client.')
+    .option('--connection [address]', 'Set DB connection.')
+    .option('--migrations-directory [path]', 'Set migrations directory.')
+    .option('--migrations-table-name [path]', 'Set migrations table name.')
     .option(
       '--env [name]',
       'environment, default: process.env.NODE_ENV || development'
@@ -118,7 +191,7 @@ function invoke(env) {
       const stubPath = `./knexfile.${type}`;
       readFile(
         path.dirname(env.modulePath) +
-          '/lib/migrate/stub/knexfile-' +
+          '/lib/migrations/migrate/stub/knexfile-' +
           type +
           '.stub'
       )
@@ -143,23 +216,26 @@ function invoke(env) {
       'Specify the migration stub to use. If using <name> the file must be located in config.migrations.directory'
     )
     .action(async (name) => {
-      const opts = commander.opts();
-      opts.client = opts.client || 'sqlite3'; // We don't really care about client when creating migrations
-      const instance = await initKnex(env, opts);
-      const ext = getMigrationExtension(env, opts);
-      const configOverrides = { extension: ext };
+      try {
+        const opts = commander.opts();
+        const instance = await initKnex(env, opts, true);  // Skip config check, we don't really care about client when creating migrations
+        const ext = getMigrationExtension(env, opts);
+        const configOverrides = { extension: ext };
 
-      const stub = getStubPath('migrations', env, opts);
-      if (stub) {
-        configOverrides.stub = stub;
+        const stub = getStubPath('migrations', env, opts);
+        if (stub) {
+          configOverrides.stub = stub;
+        }
+
+        instance.migrate
+          .make(name, configOverrides)
+          .then((name) => {
+            success(color.green(`Created Migration: ${name}`));
+          })
+          .catch(exit);
+      } catch(err) {
+        exit(err);
       }
-
-      instance.migrate
-        .make(name, configOverrides)
-        .then((name) => {
-          success(color.green(`Created Migration: ${name}`));
-        })
-        .catch(exit);
     });
 
   commander
@@ -310,26 +386,29 @@ function invoke(env) {
       false
     )
     .action(async (name) => {
-      const opts = commander.opts();
-      opts.client = opts.client || 'sqlite3'; // We don't really care about client when creating seeds
-      const instance = await initKnex(env, opts);
-      const ext = getSeedExtension(env, opts);
-      const configOverrides = { extension: ext };
-      const stub = getStubPath('seeds', env, opts);
-      if (stub) {
-        configOverrides.stub = stub;
-      }
+      try {
+        const opts = commander.opts();
+        const instance = await initKnex(env, opts, true); // Skip config check, we don't really care about client when creating seeds
+        const ext = getSeedExtension(env, opts);
+        const configOverrides = { extension: ext };
+        const stub = getStubPath('seeds', env, opts);
+        if (stub) {
+          configOverrides.stub = stub;
+        }
 
-      if (opts.timestampFilenamePrefix) {
-        configOverrides.timestampFilenamePrefix = opts.timestampFilenamePrefix;
-      }
+        if (opts.timestampFilenamePrefix) {
+          configOverrides.timestampFilenamePrefix = opts.timestampFilenamePrefix;
+        }
 
-      instance.seed
-        .make(name, configOverrides)
-        .then((name) => {
-          success(color.green(`Created seed file: ${name}`));
-        })
-        .catch(exit);
+        instance.seed
+          .make(name, configOverrides)
+          .then((name) => {
+            success(color.green(`Created seed file: ${name}`));
+          })
+          .catch(exit);
+      } catch(err) {
+        exit(err);
+      }   
     });
 
   commander
@@ -355,21 +434,6 @@ function invoke(env) {
   commander.parse(process.argv);
 }
 
-const cli = new Liftoff({
-  name: 'knex',
-  extensions: interpret.jsVariants,
-  v8flags: require('v8flags'),
-  moduleName: require('../package.json').name,
-});
-
-cli.on('require', function (name) {
-  console.log('Requiring external module', color.magenta(name));
-});
-
-cli.on('requireFail', function (name) {
-  console.log(color.red('Failed to load external module'), color.magenta(name));
-});
-
 // FYI: The handling for the `--cwd` and `--knexfile` arguments is a bit strange,
 //      but we decided to retain the behavior for backwards-compatibility.  In
 //      particular: if `--knexfile` is a relative path, then it will be resolved
@@ -377,7 +441,7 @@ cli.on('requireFail', function (name) {
 //
 //      So, the easiest way to replicate this behavior is to have the CLI change
 //      its CWD to `--cwd` immediately before initializing everything else.  This
-//      ensures that Liftoff will then resolve the path to `--knexfile` correctly.
+//      ensures that path.resolve will then resolve the path to `--knexfile` correctly.
 if (argv.cwd) {
   process.chdir(argv.cwd);
 }
@@ -405,11 +469,4 @@ if (argv.esm) {
   };
 }
 
-cli.launch(
-  {
-    configPath: argv.knexfile,
-    require: argv.require,
-    completion: argv.completion,
-  },
-  invoke
-);
+invoke();

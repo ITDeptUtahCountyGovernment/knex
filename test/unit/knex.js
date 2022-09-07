@@ -1,10 +1,10 @@
-const { inherits } = require('util');
 const Knex = require('../../lib/index');
-const QueryBuilder = require('../../lib/query/builder');
+const QueryBuilder = require('../../lib/query/querybuilder');
 const { expect } = require('chai');
 const sqliteConfig = require('../knexfile').sqlite3;
 const sqlite3 = require('sqlite3');
 const { noop } = require('lodash');
+const sinon = require('sinon');
 
 describe('knex', () => {
   describe('supports passing existing connection', () => {
@@ -237,7 +237,7 @@ describe('knex', () => {
     return knex.destroy();
   });
 
-  it('passes queryContext to wrapIdentifier in raw query', async () => {
+  it('passes queryContext to wrapIdentifier in raw query', async function () {
     if (!sqliteConfig) {
       return this.skip();
     }
@@ -281,7 +281,7 @@ describe('knex', () => {
     return knex.destroy();
   });
 
-  it('passes queryContext to wrapIdentifier in raw query in transaction', async () => {
+  it('passes queryContext to wrapIdentifier in raw query in transaction', async function () {
     if (!sqliteConfig) {
       return this.skip();
     }
@@ -336,9 +336,8 @@ describe('knex', () => {
     const knexWithParams = knex.withUserParams();
     knexWithParams.client.config.postProcessResponse = null;
     const builderForTable = knex('tableName').where('1 = 1');
-    const builderWithParamsForTable = knexWithParams('tableName').where(
-      '1 = 1'
-    );
+    const builderWithParamsForTable =
+      knexWithParams('tableName').where('1 = 1');
 
     expect(knex.client.config.postProcessResponse).to.equal(noop);
     expect(knexWithParams.client.config.postProcessResponse).to.equal(null);
@@ -353,11 +352,7 @@ describe('knex', () => {
   it('throws if client module has not been installed', () => {
     // create dummy dialect which always fails when trying to load driver
     const SqliteClient = require(`../../lib/dialects/sqlite3/index.js`);
-    function ClientFoobar(config) {
-      SqliteClient.call(this, config);
-    }
-
-    inherits(ClientFoobar, SqliteClient);
+    class ClientFoobar extends SqliteClient {}
 
     ClientFoobar.prototype._driver = () => {
       throw new Error('Cannot require...');
@@ -370,11 +365,14 @@ describe('knex', () => {
   });
 
   describe('transaction', () => {
-    it('transaction of a copy with userParams retains userparams', async () => {
+    before(function skipSuiteIfSqliteConfigAbsent() {
+      // This is the case when the |DB| environment parameter does not include |sqlite|.
       if (!sqliteConfig) {
         return this.skip();
       }
+    });
 
+    it('transaction of a copy with userParams retains userparams', async function () {
       const knex = Knex(sqliteConfig);
 
       const knexWithParams = knex.withUserParams({ userParam: '451' });
@@ -388,7 +386,7 @@ describe('knex', () => {
       knex.destroy();
     });
 
-    it('propagates error correctly when all connections are in use', async () => {
+    it('propagates error correctly when all connections are in use', async function () {
       const knex = Knex(sqliteConfig);
       let trx;
       let wasAsserted = false;
@@ -412,7 +410,7 @@ describe('knex', () => {
       return knex.destroy();
     });
 
-    it('supports direct retrieval of a transaction from provider', async () => {
+    it('supports direct retrieval of a transaction from provider', async function () {
       const knex = Knex(sqliteConfig);
       const trxProvider = knex.transactionProvider();
       const trxPromise = trxProvider();
@@ -511,6 +509,15 @@ describe('knex', () => {
       return knex.destroy();
     });
 
+    it('does not reject transaction by default when handler is provided and there is a rollback', async () => {
+      const knex = Knex(sqliteConfig);
+      await knex.transaction((trx) => {
+        trx.rollback();
+      });
+
+      return knex.destroy();
+    });
+
     it('rejects execution promise if there was a manual rollback and transaction is set to reject', async () => {
       const knex = Knex(sqliteConfig);
 
@@ -593,11 +600,7 @@ describe('knex', () => {
       return knex.destroy();
     });
 
-    it('creating transaction copy with user params should throw an error', async () => {
-      if (!sqliteConfig) {
-        return this.skip();
-      }
-
+    it('creating transaction copy with user params should throw an error', async function () {
       const knex = Knex(sqliteConfig);
 
       await knex.transaction(async (trx) => {
@@ -613,7 +616,7 @@ describe('knex', () => {
   });
 
   describe('async stack traces', () => {
-    it('should capture stack trace on query builder instantiation', async () => {
+    it('should capture stack trace on query builder instantiation', async function () {
       if (!sqliteConfig) {
         return this.skip();
       }
@@ -625,7 +628,9 @@ describe('knex', () => {
       await knex('some_nonexisten_table')
         .select()
         .catch((err) => {
-          expect(err.stack.split('\n')[1]).to.match(/at createQueryBuilder \(/); // the index 1 might need adjustment if the code is refactored
+          expect(err.stack.split('\n')[1]).to.match(
+            /at Object.queryBuilder \(/
+          ); // the index 1 might need adjustment if the code is refactored
           expect(typeof err.originalStack).to.equal('string');
         });
 
@@ -634,6 +639,13 @@ describe('knex', () => {
   });
 
   describe('extend query builder', () => {
+    before(function skipSuiteIfSqliteConfigAbsent() {
+      // This is the case when the |DB| environment parameter does not include |sqlite|.
+      if (!sqliteConfig) {
+        return this.skip();
+      }
+    });
+
     let connection;
     beforeEach(() => {
       connection = new sqlite3.Database(':memory:');
@@ -719,6 +731,26 @@ describe('knex', () => {
       expect(() =>
         Knex.QueryBuilder.extend('select', function (value) {})
       ).to.throw(`Can't extend QueryBuilder with existing method ('select')`);
+    });
+
+    it('should contain the query context on a query-error event', async function () {
+      const spy = sinon.spy();
+      const context = { aPrimitive: true };
+      const knex = Knex(sqliteConfig)
+        .from('test')
+        .queryContext(context)
+        .on('query-error', spy);
+
+      try {
+        await knex.from('banana');
+        // eslint-disable-next-line no-empty
+      } catch (_e) {}
+
+      expect(spy).to.be.calledOnce;
+      const [[error, errorArgs]] = spy.args;
+      expect(error).to.be.instanceOf(Error);
+      expect(errorArgs).to.be.ok;
+      expect(errorArgs.queryContext).to.equal(context);
     });
 
     // TODO: Consider moving these somewhere that tests the

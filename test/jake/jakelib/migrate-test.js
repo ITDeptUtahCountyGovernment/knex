@@ -1,7 +1,6 @@
 #!/usr/bin/env jake
 'use strict';
 /* eslint-disable no-undef */
-/* eslint-disable no-console */
 
 const os = require('os');
 const fs = require('fs');
@@ -658,7 +657,7 @@ test('migrate:list prints migrations both completed and pending', async (temp) =
   );
 
   const migrationsListResult = await assertExec(
-    `node ${KNEX} migrate:list \
+    `NO_COLOR= node ${KNEX} migrate:list \
       --client=sqlite3 \
       --connection=${temp}/db \
       --migrations-directory=${temp}/migrations`
@@ -666,11 +665,12 @@ test('migrate:list prints migrations both completed and pending', async (temp) =
 
   assert.include(
     migrationsListResult.stdout,
-    `Found 1 Completed Migration file/files.`
-  );
-  assert.include(
-    migrationsListResult.stdout,
-    `Found 1 Pending Migration file/files.`
+    [
+      `Found 1 Completed Migration file/files.`,
+      migrationFile1,
+      `Found 1 Pending Migration file/files.`,
+      migrationFile2,
+    ].join('\n')
   );
 
   const migrationUp2Result = await assertExec(
@@ -687,7 +687,7 @@ test('migrate:list prints migrations both completed and pending', async (temp) =
   );
 
   const migrationsList2Result = await assertExec(
-    `node ${KNEX} migrate:list \
+    `NO_COLOR= node ${KNEX} migrate:list \
           --client=sqlite3 \
           --connection=${temp}/db \
           --migrations-directory=${temp}/migrations`
@@ -695,11 +695,12 @@ test('migrate:list prints migrations both completed and pending', async (temp) =
 
   assert.include(
     migrationsList2Result.stdout,
-    `Found 2 Completed Migration file/files.`
-  );
-  assert.include(
-    migrationsList2Result.stdout,
-    `No Pending Migration files Found.`
+    [
+      `Found 2 Completed Migration file/files.`,
+      migrationFile1,
+      migrationFile2,
+      `No Pending Migration files Found.`,
+    ].join('\n')
   );
 });
 

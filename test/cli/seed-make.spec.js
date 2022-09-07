@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { execCommand } = require('cli-testlab');
 const { expect } = require('chai');
-const { createTemp } = require('../../lib/util/fs');
+const { createTemp } = require('../../lib/migrations/util/fs');
 
 const KNEX = path.normalize(__dirname + '/../../bin/cli.js');
 
@@ -131,6 +131,30 @@ module.exports = {
         'test/jake-util/knexfile_seeds/somename.js'
       );
       expect(fileCount).to.equal(1);
+    });
+
+    it('Does not create new seed with default knexfile with invalid client', () => {
+      fileHelper.registerGlobForCleanup(
+        'test/jake-util/knexfile_seeds/somename.js'
+      );
+      fileHelper.createFile(
+        process.cwd() + '/knexfile.js',
+        `
+module.exports = {
+  client: 'invalidclient',
+  migrations: {
+    directory: __dirname + '/test/jake-util/knexfile_seeds',
+  },
+};
+    `,
+        { isPathAbsolute: true }
+      );
+      return execCommand(
+        `node ${KNEX} seed:make somename --knexpath=../knex.js`,
+        {
+          expectedErrorMessage: `Unknown configuration option 'client' value invalidclient.`,
+        }
+      );
     });
 
     it('Creates new seed with default ts knexfile', async () => {
