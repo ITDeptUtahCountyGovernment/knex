@@ -2699,6 +2699,7 @@ export declare namespace Knex {
     debug?: boolean;
     client?: string | typeof Client;
     dialect?: string;
+    jsonbSupport?: boolean;
     version?: string;
     connection?: string | StaticConnectionConfig | ConnectionConfigProvider;
     pool?: PoolConfig;
@@ -2887,6 +2888,7 @@ export declare namespace Knex {
       multiSubnetFailover?: boolean;
       packetSize?: number;
       trustServerCertificate?: boolean;
+      mapBinding?: (value: any) => ({ value: any, type: any } | undefined);
     }>;
     pool?: Readonly<{
       min?: number;
