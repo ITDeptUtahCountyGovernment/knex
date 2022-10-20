@@ -10,6 +10,8 @@
 
 > **A SQL query builder that is _flexible_, _portable_, and _fun_ to use!**
 
+**_For information regarding the use of this knex fork, see the [wiki](https://github.com/ITDeptUtahCountyGovernment/knex/wiki)._**
+
 A batteries-included, multi-dialect (PostgreSQL, MySQL, CockroachDB, MSSQL, SQLite3, Oracle (including Oracle Wallet Authentication)) query builder for
 Node.js, featuring:
 
