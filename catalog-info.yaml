@@ -1,0 +1,43 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: knex
+  title: knex
+  description: A query builder for PostgreSQL, MySQL and SQLite3, designed to be
+    flexible, portable, and fun to use.
+  annotations:
+    github.com/project-slug: ITDeptUtahCountyGovernment/knex
+    backstage.io/source-location: url:https://github.com/ITDeptUtahCountyGovernment/knex/
+    itdept.dev/language: JavaScript
+    itdept.dev/lines-of-code: "66472"
+    itdept.dev/other-languages: Markdown,Shell,TypeScript
+    itdept.dev/tech-stack: docker,github-actions,node
+    itdept.dev/correct-naming: "false"
+    itdept.dev/password-mgmt: none
+    itdept.dev/created-at: 2020-07-13T21:08:18Z
+    itdept.dev/catalog-last-updated: 2026-07-24T00:44:16.990Z
+    itdept.dev/linting-enforced: "false"
+    itdept.dev/ci-tested: "false"
+spec:
+  type: library
+  owner: group:default/gold-team
+  lifecycle: production
+  dependsOn:
+    - resource:default/knex-knex-test
+    - resource:default/oracle-dev-db
+    - resource:default/oracle-prod-db
+---
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: knex-knex-test
+  title: knex Knex_test Resource
+  description: Local knex_test resource for knex.
+  annotations:
+    github.com/project-slug: ITDeptUtahCountyGovernment/knex
+    itdept.dev/catalog-last-updated: 2026-07-24T00:44:16.990Z
+spec:
+  type: database
+  owner: group:default/gold-team
+  dependencyOf:
+    - component:default/knex
