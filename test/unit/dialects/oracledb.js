@@ -1,4 +1,6 @@
 const { expect } = require('chai');
+const sinon = require('sinon');
+const oracledb = require('oracledb');
 const Oracle_Client = require('../../../lib/dialects/oracledb');
 const {
   NameHelper,
@@ -172,13 +174,15 @@ describe('OracleDB Unit Tests', () => {
         password: 'p',
         ...connectionSettings,
       });
-      let passedConfig;
-      client.driver.getConnection = (config, cb) => {
-        passedConfig = config;
-        cb(null, {});
-      };
-      await client.acquireRawConnection();
-      return passedConfig;
+      const getConnection = sinon
+        .stub(client.driver, 'getConnection')
+        .callsFake((config, cb) => cb(null, {}));
+      try {
+        await client.acquireRawConnection();
+        return getConnection.firstCall.args[0];
+      } finally {
+        getConnection.restore();
+      }
     };
 
     it('passes expireTime through to the driver', async () => {
@@ -194,6 +198,14 @@ describe('OracleDB Unit Tests', () => {
         connectString: 'db.example.com/SERVICE',
       });
       expect(config).to.not.have.property('expireTime');
+    });
+
+    // require('oracledb') is shared by every test in the process, so a leftover
+    // stub would hand later Oracle integration tests fake connections.
+    it('leaves the shared oracledb driver unchanged', async () => {
+      await acquireWith({ connectString: 'db.example.com/SERVICE' });
+      expect(Object.prototype.hasOwnProperty.call(oracledb, 'getConnection'))
+        .to.be.false;
     });
   });
 });
