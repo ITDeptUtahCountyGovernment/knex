@@ -14,6 +14,15 @@ const {
 const clientWithDriver = (connection = {}) =>
   new Oracle_Client({ client: 'oracledb', connection, pool: { max: 0 } });
 
+const expectRejection = async (promise, expected) => {
+  try {
+    await promise;
+    expect.fail('Expected the promise to reject.');
+  } catch (thrown) {
+    expect(thrown).to.equal(expected);
+  }
+};
+
 const driverError = (message) =>
   Object.assign(new Error(message), { code: message.slice(0, 7) });
 
@@ -115,9 +124,25 @@ describe('OracleDB Unit Tests', () => {
       expect(isConnectionError(err)).to.be.true;
     });
 
-    it('treats a Thin mode closed socket (NJS-521) as a connection error', () => {
+    // oracledb 6 Thin wraps socket errors in NJS-500 with the cause appended.
+    it('treats a wrapped Thin mode socket error as a connection error', () => {
       const err = driverError(
-        'NJS-521: connection to host db.example.com port 1521 received end of file on the read operation'
+        'NJS-500: connection to the Oracle Database was broken\n' +
+          'NJS-521: connection to host db.example.com port 1521 received end-of-file on communication channel. (CONNECTION_ID=abc)'
+      );
+      expect(isConnectionError(err)).to.be.true;
+    });
+
+    it('treats an unwrapped NJS-521 as a connection error', () => {
+      const err = driverError(
+        'NJS-521: connection to host db.example.com port 1521 received end-of-file on communication channel. (CONNECTION_ID=abc)'
+      );
+      expect(isConnectionError(err)).to.be.true;
+    });
+
+    it('treats a session ended by the server (NJS-513) as a connection error', () => {
+      const err = driverError(
+        'NJS-513: error received through in-band notification: ORA-28'
       );
       expect(isConnectionError(err)).to.be.true;
     });
@@ -147,6 +172,49 @@ describe('OracleDB Unit Tests', () => {
       }
       expect(connection.__knex__disposed).to.equal(err);
     });
+
+    const failingCommitConnection = (method, err) => {
+      const connection = {
+        execute: () => {},
+        close: sinon.stub().resolves(),
+        [method]: (cb) => cb(err),
+      };
+      monkeyPatchConnection(connection, clientWithDriver());
+      return connection;
+    };
+
+    it('marks the connection disposed when a commit fails with NJS-500', async () => {
+      const err = driverError(
+        'NJS-500: connection to the Oracle Database was broken'
+      );
+      const connection = failingCommitConnection('commit', err);
+
+      await expectRejection(connection.commitAsync(), err);
+      expect(connection.__knex__disposed).to.equal(err);
+      expect(connection.close.calledOnce).to.be.true;
+    });
+
+    it('marks the connection disposed when a rollback fails with NJS-500', async () => {
+      const err = driverError(
+        'NJS-500: connection to the Oracle Database was broken'
+      );
+      const connection = failingCommitConnection('rollback', err);
+
+      await expectRejection(connection.rollbackAsync(), err);
+      expect(connection.__knex__disposed).to.equal(err);
+    });
+
+    // A deferred constraint failing at commit leaves the session usable.
+    it('keeps the connection when a commit fails with a SQL error', async () => {
+      const err = driverError(
+        'ORA-02091: transaction rolled back\nORA-02291: integrity constraint violated'
+      );
+      const connection = failingCommitConnection('commit', err);
+
+      await expectRejection(connection.commitAsync(), err);
+      expect(connection.__knex__disposed).to.be.undefined;
+      expect(connection.close.called).to.be.false;
+    });
   });
 
   describe('Connection Validation', () => {
@@ -157,11 +225,10 @@ describe('OracleDB Unit Tests', () => {
     });
 
     it('rejects a connection whose socket has been closed', () => {
-      expect(client.validateConnection({ isHealthy: () => false })).to.be
-        .false;
+      expect(client.validateConnection({ isHealthy: () => false })).to.be.false;
     });
 
-    // oracledb drivers older than 6 may not have isHealthy().
+    // isHealthy() arrived in oracledb 5.4, and the fork still supports older drivers.
     it('accepts a connection from a driver without isHealthy', () => {
       expect(client.validateConnection({})).to.be.true;
     });
@@ -200,12 +267,31 @@ describe('OracleDB Unit Tests', () => {
       expect(config).to.not.have.property('expireTime');
     });
 
+    // Knexfiles often write `process.env.X ? Number(process.env.X) : null`, and
+    // oracledb rejects a null expireTime on every connect.
+    it('leaves expireTime out when it is null', async () => {
+      const config = await acquireWith({
+        connectString: 'db.example.com/SERVICE',
+        expireTime: null,
+      });
+      expect(config).to.not.have.property('expireTime');
+    });
+
+    // Zero is how oracledb turns prefetching off, so it must not be dropped as falsy.
+    it('passes a prefetchRowCount of 0 through to the driver', async () => {
+      const config = await acquireWith({
+        connectString: 'db.example.com/SERVICE',
+        prefetchRowCount: 0,
+      });
+      expect(config.prefetchRows).to.equal(0);
+    });
+
     // require('oracledb') is shared by every test in the process, so a leftover
     // stub would hand later Oracle integration tests fake connections.
     it('leaves the shared oracledb driver unchanged', async () => {
       await acquireWith({ connectString: 'db.example.com/SERVICE' });
-      expect(Object.prototype.hasOwnProperty.call(oracledb, 'getConnection'))
-        .to.be.false;
+      expect(Object.prototype.hasOwnProperty.call(oracledb, 'getConnection')).to
+        .be.false;
     });
   });
 });
