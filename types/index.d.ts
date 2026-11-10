@@ -3000,6 +3000,7 @@ export declare namespace Knex {
     debug?: boolean;
     requestTimeout?: number;
     connectString?: string;
+    expireTime?: number;
     expirationChecker?(): boolean;
   }
 
